@@ -1,0 +1,20 @@
+[project]
+name = "sun-protections"
+version = "0.1.0"
+description = "Carta de trayectoria solar interactiva y diseño de protecciones solares de ventanas (Shinylive)"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "matplotlib>=3.11.0",
+    "numpy>=2.4.6",
+    "shiny>=1.6.3",
+    "shinylive>=0.8.9",
+]
+
+[dependency-groups]
+# pandas y pvlib son sólo para los tests (validación contra pvlib); la app no los usa.
+dev = [
+    "pandas>=3.0.3",
+    "pvlib>=0.15.2",
+    "pytest>=9.1.1",
+]
