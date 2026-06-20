@@ -1,17 +1,17 @@
 """Geometría de la carta solar: trayectorias diarias, analema horario y posición actual.
 
 Construye los datos (azimut, elevación) que dibuja ``charts.sunpath`` a partir del núcleo
-``solar.position``. Trabaja en **Hora Solar Estándar Local (LST)**: un desfase UTC fijo
-(sin horario de verano) derivado de la zona IANA. Esto evita discontinuidades de DST en las
-curvas y es la convención habitual en diagramas de trayectoria solar.
+``solar.position``. El tiempo se maneja como **hora solar media local**: el desfase respecto
+a UTC se deriva de la **longitud** (offset = longitud / 15 h), sin necesidad de una zona
+horaria civil. Así el mediodía del reloj cae cerca del mediodía solar y no hace falta
+``zoneinfo``/``tzdata``.
 
-Sin pandas: sólo numpy + ``zoneinfo`` de la stdlib (en Pyodide requiere el paquete ``tzdata``).
+Sólo numpy + librería estándar.
 """
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta
-from zoneinfo import ZoneInfo
+from datetime import datetime
 
 import numpy as np
 
@@ -29,37 +29,25 @@ MONTH_LABELS = ["Ene", "Feb", "Mar", "Abr", "May", "Jun",
                 "Jul", "Ago", "Sep", "Oct", "Nov", "Dic"]
 
 
-def standard_utc_offset(tz_name: str, year: int = 2026) -> timedelta:
-    """Desfase UTC de la **hora estándar** (sin DST) de una zona IANA.
+def _local_to_utc(local_times_dt64: np.ndarray, longitude: float) -> np.ndarray:
+    """Convierte hora solar media local (datetime64) a UTC según la longitud.
 
-    Se calcula como ``utcoffset - dst`` en una fecha de referencia, lo que devuelve
-    siempre el desfase base aunque la fecha caiga en horario de verano.
+    Desfase = longitud/15 horas (Este positivo). UTC = local − desfase.
     """
-    tz = ZoneInfo(tz_name)
-    ref = datetime(year, 1, 1, 12)
-    return tz.utcoffset(ref) - tz.dst(ref)
+    off_s = int(round(longitude / 15.0 * 3600.0))
+    return local_times_dt64.astype("datetime64[s]") - np.timedelta64(off_s, "s")
 
 
-def _local_std_to_utc(local_times_dt64: np.ndarray, offset: timedelta) -> np.ndarray:
-    """Convierte tiempos LST (datetime64 naive) a UTC restando el desfase fijo."""
-    off = np.timedelta64(int(offset.total_seconds()), "s")
-    return (local_times_dt64.astype("datetime64[s]") - off)
-
-
-def day_track(date_iso: str, latitude: float, longitude: float, tz_name: str,
-              step_min: int = 5) -> dict:
-    """Trayectoria solar de un día (en LST) en una geolocalización.
+def day_track(date_iso: str, latitude: float, longitude: float, step_min: int = 5) -> dict:
+    """Trayectoria solar de un día en una geolocalización (hora solar media local).
 
     Returns dict con ``azimuth`` y ``elevation`` (sólo puntos sobre el horizonte) y
-    ``time_h`` (hora local decimal), listos para graficar.
+    ``time_h`` (hora local decimal).
     """
-    offset = standard_utc_offset(tz_name, int(date_iso[:4]))
     start = np.datetime64(f"{date_iso}T00:00", "s")
     steps = np.arange(0, 24 * 60, step_min)
     local = start + steps * np.timedelta64(1, "m")
-    utc = _local_std_to_utc(local, offset)
-
-    sp = solar_position(utc, latitude, longitude)
+    sp = solar_position(_local_to_utc(local, longitude), latitude, longitude)
     above = sp["apparent_elevation"] > 0.0
     return {
         "azimuth": sp["azimuth"][above],
@@ -68,35 +56,28 @@ def day_track(date_iso: str, latitude: float, longitude: float, tz_name: str,
     }
 
 
-def hour_analemma(hour: int, latitude: float, longitude: float, tz_name: str,
+def hour_analemma(hour: int, latitude: float, longitude: float,
                   year: int = 2026, step_days: int = 3) -> dict:
-    """Analema: posición del Sol a una misma hora LST a lo largo del año (curva en 8)."""
-    offset = standard_utc_offset(tz_name, year)
+    """Analema: posición del Sol a una misma hora local a lo largo del año (curva en 8)."""
     start = np.datetime64(f"{year}-01-01T00:00", "s") + np.timedelta64(hour * 60, "m")
     days = np.arange(0, 365, step_days)
     local = start + days * np.timedelta64(1, "D")
-    utc = _local_std_to_utc(local, offset)
-
-    sp = solar_position(utc, latitude, longitude)
+    sp = solar_position(_local_to_utc(local, longitude), latitude, longitude)
     above = sp["apparent_elevation"] > 0.0
     return {"azimuth": sp["azimuth"][above], "elevation": sp["apparent_elevation"][above]}
 
 
-def day_events(date_iso: str, latitude: float, longitude: float, tz_name: str) -> dict:
-    """Orto, ocaso, mediodía solar y duración del día (en hora local estándar, LST).
+def day_events(date_iso: str, latitude: float, longitude: float) -> dict:
+    """Orto, ocaso, mediodía solar y duración del día (hora solar media local).
 
-    Se calcula muestreando el día a 1 min y detectando los cruces de la elevación
-    aparente por 0°. Maneja correctamente el día y la noche polares (devuelve ``None``).
-
-    Returns dict: ``sunrise``, ``sunset``, ``solar_noon`` (horas locales decimales o None),
-    ``day_length`` (horas), ``max_elevation`` (°), ``polar_day``/``polar_night`` (bool).
+    Maneja correctamente el día y la noche polares. Returns dict: ``sunrise``, ``sunset``,
+    ``solar_noon`` (horas decimales o None), ``day_length`` (h), ``max_elevation`` (°),
+    ``polar_day``/``polar_night`` (bool).
     """
-    offset = standard_utc_offset(tz_name, int(date_iso[:4]))
     start = np.datetime64(f"{date_iso}T00:00", "s")
     minutes = np.arange(0, 24 * 60 + 1)
     local = start + minutes * np.timedelta64(1, "m")
-    utc = _local_std_to_utc(local, offset)
-    sp = solar_position(utc, latitude, longitude)
+    sp = solar_position(_local_to_utc(local, longitude), latitude, longitude)
     elev = sp["apparent_elevation"]
     hours = minutes / 60.0
 
@@ -112,7 +93,6 @@ def day_events(date_iso: str, latitude: float, longitude: float, tz_name: str) -
         result["polar_night"] = True
         return result
 
-    # Cruces por cero: signo de elev cambia entre muestras consecutivas.
     crossings = np.where(np.diff(np.sign(elev)))[0]
     rises = [c for c in crossings if elev[c + 1] > elev[c]]
     sets = [c for c in crossings if elev[c + 1] < elev[c]]
@@ -122,8 +102,6 @@ def day_events(date_iso: str, latitude: float, longitude: float, tz_name: str) -
         result["sunset"] = _interp_zero(hours, elev, sets[-1])
     if result["sunrise"] is not None and result["sunset"] is not None:
         result["day_length"] = result["sunset"] - result["sunrise"]
-
-    # Mediodía solar = instante de máxima elevación.
     result["solar_noon"] = float(hours[int(np.argmax(elev))])
     return result
 
@@ -134,15 +112,22 @@ def _interp_zero(x: np.ndarray, y: np.ndarray, i: int) -> float:
     return float(x0 - y0 * (x1 - x0) / (y1 - y0))
 
 
-def sun_at(local_dt: datetime, latitude: float, longitude: float, tz_name: str) -> dict:
-    """Posición y datos solares en un instante de **hora civil local** (con DST si aplica).
+def day_hour_points(date_iso: str, latitude: float, longitude: float):
+    """Posición del Sol a cada hora en punto de un día, sólo sobre el horizonte.
 
-    A diferencia de las curvas (que usan LST), el punto "ahora" respeta la hora civil que
-    elige el usuario. Devuelve escalares (no arrays).
+    Returns ``(hours, azimuth, elevation)`` — para marcar las horas sobre la trayectoria.
     """
-    aware = local_dt.replace(tzinfo=ZoneInfo(tz_name))
-    utc = aware.astimezone(ZoneInfo("UTC")).replace(tzinfo=None)
-    sp = solar_position(np.datetime64(utc, "s"), latitude, longitude)
+    hours = np.arange(0, 24)
+    local = np.datetime64(f"{date_iso}T00:00", "s") + hours * np.timedelta64(60, "m")
+    sp = solar_position(_local_to_utc(local, longitude), latitude, longitude)
+    above = sp["apparent_elevation"] > 0.0
+    return hours[above], sp["azimuth"][above], sp["apparent_elevation"][above]
+
+
+def sun_at(local_dt: datetime, latitude: float, longitude: float) -> dict:
+    """Posición y datos solares en un instante de hora solar media local. Escalares."""
+    local = np.datetime64(local_dt.replace(microsecond=0), "s")
+    sp = solar_position(_local_to_utc(local, longitude), latitude, longitude)
     return {k: float(v[0]) for k, v in sp.items()}
 
 
@@ -157,11 +142,7 @@ def monthly_dates(year: int = 2026) -> dict:
 
 
 def to_display_azimuth(azimuth: np.ndarray, convention: str = "N0") -> np.ndarray:
-    """Convierte azimut interno (N=0°, horario) a la convención de presentación.
-
-    ``"N0"`` deja N=0°; ``"S0"`` mide desde el Sur (S=0°, horario hacia el Oeste),
-    típico en arquitectura solar.
-    """
+    """Convierte azimut interno (N=0°, horario) a la convención de presentación."""
     if convention == "S0":
         return np.mod(np.asarray(azimuth) - 180.0, 360.0)
     return np.asarray(azimuth)

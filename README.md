@@ -1,30 +1,27 @@
 # sun-protections
 
-App web **interactiva y educativa** para visualizar la **trayectoria solar aparente** en
-cualquier geolocalización y (en fases siguientes) **diseñar protecciones solares de
-ventanas** (aleros, parteluces, celosías).
+App web **interactiva** para visualizar la **trayectoria solar aparente** y **diseñar
+protecciones solares de ventanas** (alero horizontal con extensiones laterales).
 
 Corre **100 % en el navegador** vía [Shinylive](https://shiny.posit.co/py/docs/shinylive.html)
 (Shiny for Python compilado a WebAssembly con Pyodide). Se publica como sitio **estático** en
 GitHub Pages: **sin servidor**.
 
-## Estado
+## Qué hace
 
-**Fase 1 (carta solar) — completa.** Carta de trayectoria solar interactiva (cartesiana y
-polar/estereográfica), curvas mensuales y de solsticios/equinoccios, analema horario,
-posición del Sol en el instante elegido, orto/ocaso/mediodía solar/duración del día y panel
-educativo con ecuaciones vivas (MathJax).
-
-- **Fase 2** (en diseño): diseño de protecciones — ventana + alero/parteluz/celosía, máscara
-  de sombreado, ángulos VSA/HSA, métricas verano/invierno.
-- **Fase 3**: irradiancia incidente (pvlib, cielo despejado), exportar datos/figuras.
-
-Ver [`DESIGN.md`](DESIGN.md) para la arquitectura y decisiones.
+- **Carta de trayectoria solar estereográfica**: solsticios/equinoccios + 7 arcos de
+  referencia, analema horario, día seleccionado en rojo con marcadores de hora y posición
+  del Sol. Depende solo de **latitud + fecha + hora solar** (la longitud no afecta la
+  trayectoria aparente).
+- **Diseño de protección (alero)**: máscara de sombra total real proyectada sobre la carta,
+  con los ángulos de corte **VSA** (profundidad) y **HSA** laterales (extensiones).
+- **Esquema de ventana** en proyección ortográfica alineada (planta · sección · alzado) con
+  la sombra real a la hora elegida y las cotas/ángulos relacionados.
 
 ## Precisión
 
-La posición solar usa el algoritmo **NOAA / Jean Meeus** implementado en **numpy puro** (sin
-pvlib ni scipy en runtime → carga ligera). Validado contra el SPA de `pvlib`: error máximo
+La posición solar usa el algoritmo **NOAA / Jean Meeus** en **numpy puro** (sin pvlib ni
+scipy en runtime → carga ligera). Validado contra el SPA de `pvlib`: error máximo
 **~0.014° en elevación** y **~0.06° en azimut** para todo un año en latitudes de −34° a 70°.
 
 ## Desarrollo
@@ -45,20 +42,21 @@ uv run python -m http.server --directory _site --bind localhost 8008
 ```
 
 > **Nota Pyodide:** `requirements.txt` declara los paquetes que el navegador instala en
-> runtime. `tzdata` es imprescindible (zonas horarias); `numpy`/`matplotlib` los provee
-> Pyodide. En la Fase 3 se añadirán `pvlib`, `scipy`, `h5py`.
+> runtime. La app usa solo `numpy` y `matplotlib` (ambos provistos por Pyodide); `pvlib`
+> queda como dependencia de desarrollo (validación en los tests).
 
 ## Estructura
 
 ```
-app.py            UI Shiny (orquesta; no calcula)
-solar/            núcleo de cálculo (numpy puro)
-  position.py       posición solar NOAA/Meeus
-  geometry.py       trayectorias, analema, eventos del día, zonas horarias
-charts/sunpath.py renderizado matplotlib (cartesiana + polar)
-data/cities.py    presets de ciudades
-content/edu.py    ecuaciones vivas (LaTeX) + textos
-tests/            validación (incl. contra pvlib)
+app.py              UI Shiny (orquesta; no calcula)
+solar/
+  position.py       posición solar NOAA/Meeus (numpy puro)
+  geometry.py       trayectorias, analema, eventos del día (hora solar por longitud)
+  shading.py        geometría de sombreado (VSA, HSA, fracción, malla)
+charts/
+  sunpath.py        carta estereográfica
+  window.py         esquema de ventana (planta · sección · alzado)
+tests/              validación (incl. contra pvlib)
 ```
 
 ## Despliegue

@@ -1,29 +1,29 @@
-"""Tests de solar.geometry (zonas horarias, trayectorias, eventos del día, azimut)."""
+"""Tests de solar.geometry (trayectorias, eventos del día, hora por longitud, azimut)."""
 
-from datetime import datetime, timedelta
+from datetime import datetime
 
 import numpy as np
-import pytest
 
 from charts.sunpath import _break_wrap
 from solar.geometry import (
+    _local_to_utc,
     day_events,
     day_track,
-    standard_utc_offset,
     sun_at,
     to_display_azimuth,
 )
 
 
-def test_standard_offset_ignores_dst():
-    # Hora estándar (sin horario de verano).
-    assert standard_utc_offset("America/Mexico_City") == timedelta(hours=-6)
-    assert standard_utc_offset("Europe/Madrid") == timedelta(hours=1)
-    assert standard_utc_offset("UTC") == timedelta(0)
+def test_local_to_utc_offset_from_longitude():
+    # Longitud −99.23° → desfase ≈ −6.6 h → UTC = local + 6.6 h.
+    local = np.datetime64("2026-06-21T12:00", "s")
+    utc = _local_to_utc(local, -99.23)
+    off_h = (utc - local) / np.timedelta64(1, "h")
+    assert abs(off_h - 99.23 / 15.0) < 1e-3  # UTC adelantado respecto a local oeste
 
 
 def test_day_track_only_above_horizon():
-    t = day_track("2026-06-21", 18.85, -99.23, "America/Mexico_City")
+    t = day_track("2026-06-21", 18.85, -99.23)
     assert t["azimuth"].size == t["elevation"].size == t["time_h"].size
     assert t["elevation"].min() > 0.0
     assert t["azimuth"].min() >= 0.0 and t["azimuth"].max() <= 360.0
@@ -45,20 +45,20 @@ def test_break_wrap_inserts_nan_on_jump():
 
 
 def test_day_events_equinox_about_twelve_hours():
-    ev = day_events("2026-03-20", 18.85, -99.23, "America/Mexico_City")
+    ev = day_events("2026-03-20", 18.85, -99.23)
     assert ev["sunrise"] is not None and ev["sunset"] is not None
     assert ev["sunrise"] < ev["solar_noon"] < ev["sunset"]
     assert abs(ev["day_length"] - 12.0) < 0.3  # equinoccio ≈ 12 h
 
 
 def test_day_events_polar_night_and_day():
-    night = day_events("2026-12-21", 69.65, 18.96, "Europe/Oslo")
+    night = day_events("2026-12-21", 69.65, 18.96)
     assert night["polar_night"] and night["sunrise"] is None
-    day = day_events("2026-06-21", 69.65, 18.96, "Europe/Oslo")
+    day = day_events("2026-06-21", 69.65, 18.96)
     assert day["polar_day"] and day["day_length"] == 24.0
 
 
 def test_sun_at_returns_scalars():
-    s = sun_at(datetime(2026, 6, 21, 12, 0), 18.85, -99.23, "America/Mexico_City")
+    s = sun_at(datetime(2026, 6, 21, 12, 0), 18.85, -99.23)
     assert all(isinstance(v, float) for v in s.values())
     assert 0 < s["apparent_elevation"] <= 90
