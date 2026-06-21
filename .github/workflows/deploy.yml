@@ -29,8 +29,12 @@ jobs:
       - name: Instalar uv
         uses: astral-sh/setup-uv@v5
 
-      - name: Exportar sitio Shinylive
-        run: uv run shinylive export . _site
+      - name: Exportar sitio Shinylive (solo archivos de runtime)
+        run: |
+          mkdir -p build
+          cp app.py requirements.txt build/
+          cp -r solar charts build/
+          uv run shinylive export build _site
 
       - name: Subir artefacto de Pages
         uses: actions/upload-pages-artifact@v3
