@@ -25,6 +25,9 @@ app_ui = ui.page_sidebar(
         ui.input_slider("fecha", "Fecha", min=date(2026, 1, 1), max=date(2026, 12, 31),
                         value=date(2026, 6, 21), time_format="%d %b"),
         ui.input_slider("hora", "Hora solar", min=0, max=24, value=12, step=0.25),
+        ui.input_select("theme", "Tema de la carta",
+                        choices={"pizarra": "Pizarra", "oscuro": "Oscuro", "claro": "Claro"},
+                        selected="pizarra"),
         ui.hr(),
         ui.input_checkbox("show_shading", "Protección: alero horizontal", value=True),
         ui.panel_conditional(
@@ -39,7 +42,6 @@ app_ui = ui.page_sidebar(
             ui.input_numeric("ext_right", "Extensión del alero · derecha (m)",
                              value=0.0, min=0, max=2, step=0.1),
             ui.input_numeric("offset", "Alero sobre el dintel (m)", value=0.0, min=0, max=1.5, step=0.05),
-            ui.input_action_button("calcular", "Calcular protección", class_="btn-primary btn-sm mt-1"),
         ),
         title="Controles",
         width=300,
@@ -126,48 +128,44 @@ def server(input, output, session):
             hour, minute = 23, 59
         return datetime(d.year, d.month, d.day, hour, minute)
 
-    # Tiempo/ubicación EN VIVO (debounced): mueven la carta al soltar el slider.
-    live = _debounce(lambda: (latitude(), current_dt()), 0.25)
-
-    # Protección (alero): se "congela" hasta presionar el botón. Guarda la geometría del
-    # alero + una instantánea de la posición del Sol al momento de calcular.
-    device = reactive.value(None)
-
-    @reactive.effect
-    @reactive.event(input.calcular, input.show_shading, ignore_init=False)
-    def _apply_device():
-        if not input.show_shading():
-            device.set(None)
-            return
-
+    @reactive.calc
+    def _raw():
+        """Todos los parámetros que disparan recálculo (lat, instante, alero)."""
         def n(value, default):  # los input_numeric devuelven None si se vacían
             return default if value is None else float(value)
 
-        spec = {"wall_az": n(input.wall_az(), 180.0), "depth": n(input.depth(), 0.6),
-                "window_h": n(input.win_h(), 1.5), "window_w": n(input.win_w(), 1.2),
-                "ext_left": n(input.ext_left(), 0.0), "ext_right": n(input.ext_right(), 0.0),
-                "offset": n(input.offset(), 0.0)}
-        s = sun_at(current_dt(), latitude(), 0.0)  # aislado por reactive.event
-        spec["sun_az"] = s["azimuth"]
-        spec["sun_elev"] = s["apparent_elevation"]
-        device.set(spec)
+        spec = None
+        if input.show_shading():
+            spec = {"wall_az": n(input.wall_az(), 180.0), "depth": n(input.depth(), 0.6),
+                    "window_h": n(input.win_h(), 1.5), "window_w": n(input.win_w(), 1.2),
+                    "ext_left": n(input.ext_left(), 0.0), "ext_right": n(input.ext_right(), 0.0),
+                    "offset": n(input.offset(), 0.0)}
+        return (latitude(), current_dt(), spec)
+
+    # Un solo snapshot "debounced": todo se recalcula al SOLTAR (tras una breve pausa),
+    # sin avalancha mientras arrastras. Carta y esquema de ventana usan el mismo snapshot.
+    snap = _debounce(_raw, 0.3)
 
     @render.plot
     def sunpath():
-        lv = live()
-        if lv is None:
+        s = snap()
+        if s is None:
             return _placeholder("…")
-        lat, dt = lv
-        return render_sunpath(lat, current_dt=dt, year=dt.year, shading=device())
+        lat, dt, spec = s
+        return render_sunpath(lat, current_dt=dt, year=dt.year, shading=spec,
+                              theme=input.theme())
 
     @render.plot
     def window_diagram():
-        d = device()
-        if d is None:
-            return _placeholder("Activa el alero y presiona «Calcular protección»")
-        return render_window_shadow(d["wall_az"], d["depth"], d["window_h"], d["window_w"],
-                                    d["offset"], d["sun_az"], d["sun_elev"],
-                                    ext_left=d["ext_left"], ext_right=d["ext_right"])
+        s = snap()
+        if s is None or s[2] is None:
+            return _placeholder("Activa el alero para ver la sombra en la ventana")
+        lat, dt, spec = s
+        sun = sun_at(dt, lat, 0.0)
+        return render_window_shadow(spec["wall_az"], spec["depth"], spec["window_h"],
+                                    spec["window_w"], spec["offset"],
+                                    sun["azimuth"], sun["apparent_elevation"],
+                                    ext_left=spec["ext_left"], ext_right=spec["ext_right"])
 
 
 app = App(app_ui, server)

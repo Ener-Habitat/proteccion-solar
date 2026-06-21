@@ -94,7 +94,18 @@ def _alzado(ax, X, Y, blocked, lit, window_w, window_h, top, xL, xR, ext_left, e
             yd = top + 0.12
             ax.annotate("", (x1, yd), (x0, yd), arrowprops=dict(arrowstyle="<->", color="#888", lw=0.8))
             ax.text((x0 + x1) / 2, yd + 0.02, f"{ext:.1f}", fontsize=6.5, color="#666", ha="center", va="bottom")
-    ax.text(window_w / 2, -0.42, "Alzado (frente)", fontsize=9, ha="center", va="center", color="#444")
+
+    # Cotas de la VENTANA: ancho (abajo) y alto (derecha).
+    yw = -0.2
+    ax.annotate("", (window_w, yw), (0, yw), arrowprops=dict(arrowstyle="<->", color="#888", lw=0.8))
+    ax.text(window_w / 2, yw - 0.03, f"ancho {window_w:.2f} m", fontsize=6.5, color="#666",
+            ha="center", va="top")
+    xh = xR + 0.2
+    ax.annotate("", (xh, window_h), (xh, 0), arrowprops=dict(arrowstyle="<->", color="#888", lw=0.8))
+    ax.text(xh + 0.05, window_h / 2, f"alto {window_h:.2f} m", fontsize=6.5, color="#666",
+            ha="center", va="center", rotation=90)
+
+    ax.text(window_w / 2, -0.46, "Alzado (frente)", fontsize=9, ha="center", va="center", color="#444")
 
 
 def _planta(ax, depth, window_w, ext_left, ext_right, xL, xR, py0):

@@ -29,11 +29,16 @@ _KEY_COLORS = {
     "Solsticio de verano (≈21 jun)": "#c0392b",
     "Solsticio de invierno (≈21 dic)": "#2e86c1",
 }
-_REF_COLOR = "#ef9234"        # días de referencia (naranja)
-_ANALEMMA_COLOR = "#f0ab5a"   # analema horario (naranja punteado)
 _SELECTED_COLOR = "#e10600"   # día seleccionado (rojo)
 _SUN_FACE = "#e10600"         # Sol actual (punto rojo con halo)
 _SUN_HALO = "#ffd21a"
+
+# Temas: fondo + malla + texto + color de analema/arcos (rojo/cian/amarillo van en ambos).
+_THEMES = {
+    "claro":   dict(bg="white",   grid="#cfcfcf", text="#333333", analemma="#d98023", ref="#ef9234"),
+    "pizarra": dict(bg="#e9eef4", grid="#b9c6d6", text="#2f3e4d", analemma="#cf7a1e", ref="#e07b2a"),
+    "oscuro":  dict(bg="#1b2230", grid="#3c4a63", text="#cfd8e3", analemma="#ffb84d", ref="#ff9248"),
+}
 
 # Circunferencias de elevación de la malla polar (cada 10°, como en el diagrama clásico).
 _ELEV_GRID = [10, 20, 30, 40, 50, 60, 70, 80]
@@ -76,6 +81,7 @@ def render_sunpath(
     mark_sun: bool = True,
     year: int = 2026,
     shading: dict | None = None,
+    theme: str = "pizarra",
 ):
     """Construye y devuelve la figura estereográfica de la carta solar.
 
@@ -88,30 +94,33 @@ def render_sunpath(
     """
     longitude = 0.0  # la longitud se cancela; usamos hora solar media (lon=0)
     selected = current_dt.date().isoformat() if current_dt is not None else None
+    th = _THEMES.get(theme, _THEMES["pizarra"])
 
     fig, ax = plt.subplots(figsize=(7.6, 7.6), subplot_kw={"projection": "polar"})
+    fig.patch.set_facecolor(th["bg"])
+    ax.set_facecolor(th["bg"])
     ax.set_theta_zero_location("N")
     ax.set_theta_direction(-1)  # azimut horario
 
     if shading:
         _overhang_mask(ax, shading)
 
-    # Analema horario (líneas de igual hora a lo largo del año), naranja punteado.
+    # Analema horario (líneas de igual hora a lo largo del año), punteado.
     if show_analemma:
         for h in range(4, 21):
             a = geo.hour_analemma(h, latitude, longitude)
             if a["azimuth"].size == 0:
                 continue
             ax.plot(np.radians(a["azimuth"]), _elev_to_r(a["elevation"]), ":",
-                    color=_ANALEMMA_COLOR, lw=0.7, zorder=2)
+                    color=th["analemma"], lw=0.8, zorder=2)
 
-    # Días de referencia (7 arcos, naranja).
+    # Días de referencia (7 arcos).
     for m in _REF_MONTHS:
         t = geo.day_track(f"{year}-{m:02d}-21", latitude, longitude)
         if t["azimuth"].size == 0:
             continue
         theta, r = _break_wrap(t["azimuth"], _elev_to_r(t["elevation"]))
-        ax.plot(np.radians(theta), r, color=_REF_COLOR, lw=1.3, zorder=3)
+        ax.plot(np.radians(theta), r, color=th["ref"], lw=1.3, zorder=3)
 
     # Día seleccionado (rojo) con los marcadores de las horas en punto.
     if selected:
@@ -126,9 +135,15 @@ def render_sunpath(
     ax.set_thetagrids(np.arange(0, 360, 15),
                       labels=["N", "", "", "NE", "", "", "E", "", "", "SE", "", "",
                               "S", "", "", "SW", "", "", "W", "", "", "NW", "", ""])
-    ax.tick_params(colors="0.45")
+    for gl in ax.get_xgridlines() + ax.get_ygridlines():
+        gl.set_color(th["grid"])
+    ax.spines["polar"].set_color(th["grid"])
+    ax.tick_params(colors=th["text"])
+    for lbl in ax.get_xticklabels() + ax.get_yticklabels():
+        lbl.set_color(th["text"])
     hemi = "N" if latitude >= 0 else "S"
-    ax.set_title(f"Trayectoria solar  ·  latitud {abs(latitude):.2f}° {hemi}", fontsize=11)
+    ax.set_title(f"Trayectoria solar  ·  latitud {abs(latitude):.2f}° {hemi}",
+                 fontsize=11, color=th["text"])
     fig.tight_layout()
     return fig
 
