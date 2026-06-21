@@ -168,15 +168,27 @@ def _overhang_mask(ax, s):
     offset = s.get("offset", 0.0)
     ext_l, ext_r = s.get("ext_left", 0.0), s.get("ext_right", 0.0)
 
-    az = np.linspace(0.0, 360.0, 217)
-    el = np.linspace(0.5, 90.0, 80)
-    AZ, EL = np.meshgrid(az, el)
-    frac = shd.shaded_fraction(AZ, EL, wall_az, depth, ww, wh, offset, ext_l, ext_r)
-    if frac.max() >= 0.999:
-        theta = np.radians(AZ)
-        r = _elev_to_r(EL)
-        ax.contourf(theta, r, frac, levels=[0.999, 2.0], colors=[_SHADE_COLOR], alpha=0.22, zorder=0)
-        ax.contour(theta, r, frac, levels=[0.999], colors=["#1696a8"], linewidths=1.2, zorder=1)
+    if depth > 0:
+        # Frontera analítica de la región de sombra TOTAL: para cada HSA (γ), la elevación
+        # mínima α(γ) que cumple a la vez el corte vertical (alero) y el lateral (extensión).
+        g = np.linspace(-89.9, 89.9, 181)
+        gr = np.radians(g)
+        top = wh + offset
+        vsa_cut = shd.overhang_full_shade_vsa(depth, wh, offset)
+        elev_vert = np.degrees(np.arctan(np.tan(np.radians(vsa_cut)) * np.cos(gr)))
+
+        ext_side = np.where(g >= 0.0, ext_r, ext_l)
+        num = top * np.abs(np.sin(gr))                    # desplazamiento lateral en el antepecho
+        with np.errstate(divide="ignore", invalid="ignore"):
+            elev_lat = np.degrees(np.arctan(num / ext_side))
+        elev_lat = np.where(num < 1e-9, 0.0, elev_lat)                          # γ=0: sin desfase
+        elev_lat = np.where((ext_side <= 1e-9) & (num >= 1e-9), 90.0, elev_lat)  # sin extensión: no cubre
+
+        elev_min = np.clip(np.maximum(elev_vert, elev_lat), 0.0, 90.0)
+        theta = np.radians(wall_az + g)
+        r = _elev_to_r(elev_min)
+        ax.fill_between(theta, 0.0, r, color=_SHADE_COLOR, alpha=0.20, zorder=0)
+        ax.plot(theta, np.where(elev_min >= 89.5, np.nan, r), color="#1696a8", lw=1.0, zorder=1)
 
     _mark_device_angles(ax, wall_az, depth, ww, wh, offset, ext_l, ext_r)
 

@@ -7,6 +7,7 @@ y el panel educativo con ecuaciones vivas (MathJax). Pensado para exportarse con
 
 from __future__ import annotations
 
+import time
 from datetime import date, datetime
 
 from shiny import App, reactive, render, ui
@@ -38,6 +39,7 @@ app_ui = ui.page_sidebar(
             ui.input_numeric("ext_right", "Extensión del alero · derecha (m)",
                              value=0.0, min=0, max=2, step=0.1),
             ui.input_numeric("offset", "Alero sobre el dintel (m)", value=0.0, min=0, max=1.5, step=0.05),
+            ui.input_action_button("calcular", "Calcular protección", class_="btn-primary btn-sm mt-1"),
         ),
         title="Controles",
         width=300,
@@ -74,6 +76,40 @@ def _placeholder(text: str):
     return fig
 
 
+def _debounce(read, delay: float = 0.25):
+    """Versión "debounced" de una expresión reactiva: emite el último valor sólo cuando
+    deja de cambiar durante ``delay`` segundos (evita la avalancha de renders al arrastrar).
+
+    Devuelve un ``reactive.value`` que se lee como ``salida()``.
+    """
+    out = reactive.value(None)
+    stamp = reactive.value(None)
+
+    @reactive.effect
+    def _watch():
+        v = read()                       # dependencia: la(s) entrada(s) en vivo
+        stamp.set((v, time.monotonic()))
+
+    @reactive.effect
+    def _emit():
+        s = stamp()                      # dependencia: cada cambio reprograma
+        if s is None:
+            return
+        v, t = s
+        with reactive.isolate():
+            first = out() is None
+        if first:                        # el primer valor se emite de inmediato
+            out.set(v)
+            return
+        elapsed = time.monotonic() - t
+        if elapsed >= delay:
+            out.set(v)
+        else:
+            reactive.invalidate_later(delay - elapsed)
+
+    return out
+
+
 def server(input, output, session):
     @reactive.calc
     def latitude() -> float:
@@ -90,41 +126,48 @@ def server(input, output, session):
             hour, minute = 23, 59
         return datetime(d.year, d.month, d.day, hour, minute)
 
-    @reactive.calc
-    def shading_spec():
+    # Tiempo/ubicación EN VIVO (debounced): mueven la carta al soltar el slider.
+    live = _debounce(lambda: (latitude(), current_dt()), 0.25)
+
+    # Protección (alero): se "congela" hasta presionar el botón. Guarda la geometría del
+    # alero + una instantánea de la posición del Sol al momento de calcular.
+    device = reactive.value(None)
+
+    @reactive.effect
+    @reactive.event(input.calcular, input.show_shading, ignore_init=False)
+    def _apply_device():
         if not input.show_shading():
-            return None
+            device.set(None)
+            return
 
         def n(value, default):  # los input_numeric devuelven None si se vacían
             return default if value is None else float(value)
 
-        return {"wall_az": n(input.wall_az(), 180.0), "depth": n(input.depth(), 0.6),
+        spec = {"wall_az": n(input.wall_az(), 180.0), "depth": n(input.depth(), 0.6),
                 "window_h": n(input.win_h(), 1.5), "window_w": n(input.win_w(), 1.2),
                 "ext_left": n(input.ext_left(), 0.0), "ext_right": n(input.ext_right(), 0.0),
                 "offset": n(input.offset(), 0.0)}
+        s = sun_at(current_dt(), latitude(), 0.0)  # aislado por reactive.event
+        spec["sun_az"] = s["azimuth"]
+        spec["sun_elev"] = s["apparent_elevation"]
+        device.set(spec)
 
     @render.plot
     def sunpath():
-        return render_sunpath(
-            latitude(),
-            current_dt=current_dt(),
-            year=input.fecha().year,
-            shading=shading_spec(),
-        )
-
-    @reactive.calc
-    def sun_state() -> dict:
-        return sun_at(current_dt(), latitude(), 0.0)
+        lv = live()
+        if lv is None:
+            return _placeholder("…")
+        lat, dt = lv
+        return render_sunpath(lat, current_dt=dt, year=dt.year, shading=device())
 
     @render.plot
     def window_diagram():
-        sp = shading_spec()
-        if sp is None:
-            return _placeholder("Activa el alero para ver la sombra en la ventana")
-        s = sun_state()
-        return render_window_shadow(sp["wall_az"], sp["depth"], sp["window_h"], sp["window_w"],
-                                    sp["offset"], s["azimuth"], s["apparent_elevation"],
-                                    ext_left=sp["ext_left"], ext_right=sp["ext_right"])
+        d = device()
+        if d is None:
+            return _placeholder("Activa el alero y presiona «Calcular protección»")
+        return render_window_shadow(d["wall_az"], d["depth"], d["window_h"], d["window_w"],
+                                    d["offset"], d["sun_az"], d["sun_elev"],
+                                    ext_left=d["ext_left"], ext_right=d["ext_right"])
 
 
 app = App(app_ui, server)
