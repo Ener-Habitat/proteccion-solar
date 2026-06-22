@@ -60,9 +60,6 @@ app_ui = ui.page_navbar(
                         value=date(2026, 6, 21), time_format="%d %b"),
         ui.input_slider("hora", "Hora solar", min=0, max=24, value=12, step=0.25),
         _section("Apariencia"),
-        ui.input_select("theme", "Tema de la carta",
-                        choices={"pizarra": "Pizarra", "oscuro": "Oscuro", "claro": "Claro"},
-                        selected="pizarra"),
         ui.input_select("shade_method", "Máscara de sombra",
                         choices={"practico": "Práctico (99.9999% área)",
                                  "analitico": "100% analítico (cerrado)",
@@ -231,7 +228,7 @@ def server(input, output, session):
             return _placeholder("…")
         lat, dt, spec = s
         return render_sunpath(lat, current_dt=dt, year=dt.year, shading=spec,
-                              theme=input.theme(), shade_method=input.shade_method(),
+                              shade_method=input.shade_method(),
                               show_protractor=input.show_protractor(),
                               decompose=input.decompose())
 
