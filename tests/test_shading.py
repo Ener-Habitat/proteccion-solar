@@ -4,6 +4,7 @@ import numpy as np
 
 from solar.geometry import sun_at
 from solar.shading import (
+    full_shade_boundary,
     illuminated,
     lateral_cutoff_hsa,
     overhang_full_shade_vsa,
@@ -117,10 +118,11 @@ def test_shaded_fraction_vectorized_and_grid_agree():
     az = np.array([180.0, 200.0, 235.0])
     f = shaded_fraction(az, 50.0, SOUTH, 0.8, 1.2, 1.5)
     assert f.shape == (3,)
-    # La malla del alzado promedia a la fracción analítica (tolerancia de discretización).
+    # La fracción es exacta en x; concuerda con la malla densa del alzado (solo cuantización
+    # de la malla 140×140 del lado de window_shade_grid).
     _, _, blocked = window_shade_grid(SOUTH, 0.8, 1.2, 1.5, 0.0, 0.0, 0.0, 200.0, 50.0)
     f_scalar = shaded_fraction(200.0, 50.0, SOUTH, 0.8, 1.2, 1.5)
-    assert abs(blocked.mean() - f_scalar) < 0.03
+    assert abs(blocked.mean() - f_scalar) < 0.01
 
 
 def test_fin_full_shade_hsa_geometry():
@@ -189,3 +191,62 @@ def test_tropical_south_window_not_lit_at_summer_noon():
     from datetime import datetime
     s = sun_at(datetime(2026, 6, 21, 12, 30), 18.85, -99.23)
     assert not illuminated(s["azimuth"], s["apparent_elevation"], SOUTH)
+
+
+# --- Ray casting exacto en x y borde de sombra 100% ---
+
+_CFGS = [
+    dict(depth=0.6, ext_right=0.3, fin_right=0.5, ext_top=0.4),
+    dict(depth=0.4, offset=0.1, ext_left=0.2, fin_left=0.3, fin_right=0.3, ext_top=0.5),
+]
+
+
+def _frac(az, el, k):
+    return shaded_fraction(az, el, SOUTH, k.get("depth", 0.6), 1.2, 1.5, k.get("offset", 0.0),
+                           k.get("ext_left", 0.0), k.get("ext_right", 0.0), k.get("fin_left", 0.0),
+                           k.get("fin_right", 0.0), k.get("ext_top", 0.0))
+
+
+def test_exact_fraction_matches_dense_blocked_grid():
+    """``shaded_fraction`` (exacto en x) coincide con el kernel ``_blocked`` en malla densa
+    400×400, para celosías con alero + extensiones + aletas + offset."""
+    worst = 0.0
+    for k in _CFGS:
+        for az in (185.0, 205.0, 235.0, 150.0):
+            for el in (20.0, 45.0, 68.0, 82.0):
+                _, _, blk = window_shade_grid(SOUTH, k.get("depth", 0.6), 1.2, 1.5,
+                                              k.get("offset", 0.0), k.get("ext_left", 0.0),
+                                              k.get("ext_right", 0.0), az, el, k.get("fin_left", 0.0),
+                                              k.get("fin_right", 0.0), k.get("ext_top", 0.0),
+                                              nx=400, ny=400)
+                worst = max(worst, abs(_frac(az, el, k) - blk.mean()))
+    assert worst < 0.01
+
+
+def test_full_shade_boundary_reduces_to_overhang():
+    """Sin aletas y con extensiones amplias, el borde 100% recupera el arco de VSA constante
+    (el caso solo-alero exacto). Se compara donde el corte vertical domina (|γ| ≤ 60°)."""
+    depth, wh = 0.6, 1.5
+    g, elev = full_shade_boundary(SOUTH, depth, 1.2, wh, ext_left=3.0, ext_right=3.0)
+    vsa = overhang_full_shade_vsa(depth, wh)
+    i0 = int(np.argmin(np.abs(g)))
+    assert abs(elev[i0] - vsa) < 0.1                       # en γ≈0 el umbral = VSA de corte
+    arc = np.degrees(np.arctan(np.tan(np.radians(vsa)) * np.cos(np.radians(g))))
+    m = np.abs(g) <= 60.0
+    assert np.max(np.abs(elev[m] - arc[m])) < 0.2          # sigue el arco (círculo estereográfico)
+
+
+def test_full_shade_boundary_is_true_locus_and_smooth():
+    """El borde 100% es el locus real (dentro → ~100% sombreada, fuera → no) y es **suave**
+    en la región central (sin sierra); las únicas esquinas son los cortes HSA reales (γ ≈ aleta)."""
+    k = dict(depth=0.6, fin_left=0.5, fin_right=0.5, ext_top=0.4)
+    g, elev = full_shade_boundary(SOUTH, 0.6, 1.2, 1.5, fin_left=0.5, fin_right=0.5, ext_top=0.4)
+    # Locus: justo dentro del borde, sombra total; bien afuera, no.
+    for gi in (-20.0, 0.0, 25.0):
+        i = int(np.argmin(np.abs(g - gi)))
+        e0 = elev[i]
+        assert _frac(SOUTH + g[i], min(e0 + 2.0, 89.9), k) >= 0.999
+        assert _frac(SOUTH + g[i], e0 - 5.0, k) < 0.98
+    # Suavidad: segunda diferencia pequeña en la zona central (lejos del corte HSA de la aleta).
+    center = np.abs(g) <= 50.0
+    assert np.nanmax(np.abs(np.diff(elev[center], 2))) < 1.0

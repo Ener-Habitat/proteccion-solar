@@ -132,15 +132,51 @@ def _blocked(XX, YY, g_deg, tan_vsa, depth, window_w, window_h, offset, ext_left
     return blk
 
 
+def _row_coverage(g_deg, tan_vsa, depth, window_w, window_h, offset,
+                  ext_left, ext_right, fin_left, fin_right, ext_top, y):
+    """Longitud en x (m) de la fila de la ventana a altura ``y`` que queda en sombra.
+
+    **Exacto en x:** en cada fila la sombra del alero y la de la aleta activa son, a lo más,
+    **dos intervalos** con fórmula cerrada; se devuelve la longitud de su unión. ``g_deg`` y
+    ``tan_vsa`` pueden ser arrays de posiciones solares e ``y`` un eje (final) de alturas — todo
+    por broadcasting. Hipótesis: un solo alero + una sola aleta (la activa según el signo de γ).
+    """
+    W, H = window_w, window_h
+    m = np.tan(np.radians(g_deg))
+    t = tan_vsa
+    with np.errstate(invalid="ignore", divide="ignore"):
+        # --- Alero: intervalo A = [a_lo, a_hi] ---
+        s = m * (H + offset - y) / t                       # desplazamiento lateral del rayo
+        a_lo = np.clip(-ext_left - s, 0.0, W)
+        a_hi = np.clip(W + ext_right - s, 0.0, W)
+        oh_active = (y >= (H + offset - depth * t)) & (y <= H + offset)
+        a_hi = np.where(oh_active, a_hi, a_lo)             # alero inactivo → intervalo vacío
+
+        # --- Aleta activa: intervalo B (una sola, por signo de m) ---
+        cap = (H + ext_top - y) / t                        # alcance vertical de la aleta
+        b_lo_r = np.clip(W - m * np.minimum(fin_right, cap), 0.0, W)   # aleta der. (m>0)
+        b_hi_l = np.clip(-m * np.minimum(fin_left, cap), 0.0, W)       # aleta izq. (m<0)
+    right = (m > 0.0) & (fin_right > 0.0)
+    left = (m < 0.0) & (fin_left > 0.0)
+    b_lo = np.where(right, b_lo_r, 0.0)
+    b_hi = np.where(right, float(W), np.where(left, b_hi_l, 0.0))      # sin aleta → vacío
+
+    len_a = a_hi - a_lo
+    len_b = b_hi - b_lo
+    inter = np.maximum(0.0, np.minimum(a_hi, b_hi) - np.maximum(a_lo, b_lo))
+    return len_a + len_b - inter
+
+
 def shaded_fraction(sun_azimuth, sun_elevation, wall_azimuth, depth: float,
                     window_w: float, window_h: float, offset: float = 0.0,
                     ext_left: float = 0.0, ext_right: float = 0.0,
                     fin_left: float = 0.0, fin_right: float = 0.0,
-                    ext_top: float = 0.0, n: int = 21):
+                    ext_top: float = 0.0, n: int = 81):
     """Fracción [0,1] del **área** de la ventana sombreada por la celosía (alero + aletas).
 
-    Vectorizado: acepta escalares o arrays de posiciones solares (de cualquier forma). Muestrea
-    una malla ``n × n`` sobre la ventana.
+    Vectorizado: acepta escalares o arrays de posiciones solares (de cualquier forma). Es
+    **exacto en x** (longitud cubierta por fila en forma cerrada) e integra sobre ``n`` filas en
+    altura por regla trapezoidal (convergencia rápida; error ~0.005 a n=81).
     """
     az = np.asarray(sun_azimuth, dtype=float)
     el = np.asarray(sun_elevation, dtype=float)
@@ -149,13 +185,13 @@ def shaded_fraction(sun_azimuth, sun_elevation, wall_azimuth, depth: float,
     with np.errstate(invalid="ignore", divide="ignore"):
         tan_vsa = np.tan(np.radians(el)) / np.cos(np.radians(g))
 
-    X = np.linspace(0.0, window_w, n)
     Y = np.linspace(0.0, window_h, n)
-    XX, YY = np.meshgrid(X, Y)
-    blk = _blocked(XX, YY, g[..., None, None], tan_vsa[..., None, None],
-                   depth, window_w, window_h, offset, ext_left, ext_right,
-                   fin_left, fin_right, ext_top)
-    frac = blk.mean(axis=(-1, -2))
+    cov = _row_coverage(g[..., None], tan_vsa[..., None], depth, window_w, window_h, offset,
+                        ext_left, ext_right, fin_left, fin_right, ext_top, Y)
+    # Cobertura por fila lineal a trozos → media trapezoidal en y (converge rápido en malla
+    # uniforme; sin np.trapz por compatibilidad de versiones de numpy/Pyodide).
+    mean_cov = (cov.sum(axis=-1) - 0.5 * (cov[..., 0] + cov[..., -1])) / (n - 1)
+    frac = mean_cov / window_w
     frac = np.where(lit, frac, 0.0)
     return float(frac) if np.ndim(az) == 0 else frac
 
@@ -180,3 +216,63 @@ def window_shade_grid(wall_azimuth, depth: float, window_w: float, window_h: flo
     blocked = _blocked(XX, YY, g, tan_vsa, depth, window_w, window_h, offset, ext_left, ext_right,
                        fin_left, fin_right, ext_top)
     return XX, YY, blocked
+
+
+def full_shade_boundary(wall_azimuth, depth: float, window_w: float, window_h: float,
+                        offset: float = 0.0, ext_left: float = 0.0, ext_right: float = 0.0,
+                        fin_left: float = 0.0, fin_right: float = 0.0, ext_top: float = 0.0,
+                        n_gamma: int = 180, ny: int = 200, _iters: int = 40):
+    """Curva del **borde de sombra total (100%)** sobre la estereográfica.
+
+    Devuelve ``(gamma_deg, elev_deg)`` (ambos shape ``(n_gamma,)``): para cada HSA γ, la
+    **elevación mínima** a partir de la cual la ventana queda completamente sombreada. La región
+    sombreada es ``elev ≥ elev_deg`` (alto en el cielo → cerca del cenit en la carta). Donde
+    nunca se alcanza el 100% (p. ej. sin alero, aleta somera) devuelve ``90`` (abierto).
+
+    Sin aletas: forma **cerrada exacta** (arco de VSA constante recortado por el corte lateral
+    HSA de la extensión). Con aletas: umbral por γ resuelto por bisección sobre la cobertura
+    exacta por fila (:func:`_row_coverage`) → curva continua y suave (sin ``contourf`` ni
+    suavizado).
+    """
+    g = np.linspace(-89.9, 89.9, n_gamma)
+    has_fins = fin_left > 0.0 or fin_right > 0.0
+
+    if not has_fins:                                  # --- ruta cerrada exacta ---
+        gr = np.radians(g)
+        top = window_h + offset
+        if depth > 0:
+            vsa_cut = overhang_full_shade_vsa(depth, window_h, offset)
+            elev_vert = np.degrees(np.arctan(np.tan(np.radians(vsa_cut)) * np.cos(gr)))
+        else:
+            elev_vert = np.full_like(g, 90.0)
+        ext_side = np.where(g >= 0.0, ext_right, ext_left)
+        num = top * np.abs(np.sin(gr))
+        with np.errstate(divide="ignore", invalid="ignore"):
+            elev_lat = np.degrees(np.arctan(num / ext_side))
+        elev_lat = np.where(num < 1e-9, 0.0, elev_lat)
+        elev_lat = np.where((ext_side <= 1e-9) & (num >= 1e-9), 90.0, elev_lat)
+        elev = np.clip(np.maximum(elev_vert, elev_lat), 0.0, 90.0)
+        return g, elev
+
+    # --- celosía: bisección por γ del umbral de elevación de sombra 100% ---
+    Y = np.linspace(0.0, window_h, ny)
+    gcol = g[:, None]
+    cosg = np.cos(np.radians(g))
+
+    def is_full(elev):                                # elev (n_gamma,) → bool (n_gamma,)
+        with np.errstate(invalid="ignore", divide="ignore"):
+            t = np.tan(np.radians(elev)) / cosg
+        cov = _row_coverage(gcol, t[:, None], depth, window_w, window_h, offset,
+                            ext_left, ext_right, fin_left, fin_right, ext_top, Y)
+        return cov.min(axis=-1) >= window_w * (1.0 - 1e-6)
+
+    lo = np.full(n_gamma, 0.5)
+    hi = np.full(n_gamma, 89.9)
+    reachable = is_full(hi.copy())                    # ¿llega a 100% cerca del cenit?
+    for _ in range(_iters):
+        mid = 0.5 * (lo + hi)
+        full = is_full(mid)
+        hi = np.where(full, mid, hi)
+        lo = np.where(full, lo, mid)
+    elev = np.where(reachable, hi, 90.0)
+    return g, elev
