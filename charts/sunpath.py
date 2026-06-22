@@ -110,7 +110,7 @@ def render_sunpath(
         _protractor(ax, shading["wall_az"], th)
     if shading:
         if decompose:
-            _mask_decomposition(ax, shading)
+            _mask_decomposition(ax, shading, shade_method, shade_coverage)
         else:
             _overhang_mask(ax, shading, shade_method, shade_coverage)
     if shading and (show_protractor or decompose):
@@ -205,35 +205,47 @@ def _protractor(ax, wall_az, th):
 _DECOMP = (("#e07b39", "alero solo"), ("#7d3c98", "aletas solas"), ("#2ca02c", "solo combinados"))
 
 
-def _mask_decomposition(ax, s):
-    """Descompone la región de sombra 100% en tres capas de color: la que da el **alero solo**,
-    la de las **aletas solas**, y —en color nuevo— la **'solo combinados'** (lo que ni uno ni
-    otro logra por separado pero su unión sí). Visualiza §3.5: la combinación cubre MÁS que la
-    unión de las máscaras individuales."""
+def _mask_decomposition(ax, s, method="practico", coverage=0.999999):
+    """Descompone la región de sombra 100% por **procedencia**, derivada de las MISMAS curvas que
+    la máscara seleccionada — su **borde exterior coincide** con ella. Tres capas: **alero solo**
+    (casquete, borde del método con aletas=0), **aletas solas** (banda baja, acotada por el escape
+    de la aleta en forma cerrada) y, en color nuevo, **'solo combinados'** (lo que muestra el resto
+    de la región combinada: ni uno ni otro por separado). Visualiza §3.5."""
     wall_az = s["wall_az"]
     depth, ww, wh = s["depth"], s["window_w"], s["window_h"]
     offset = s.get("offset", 0.0)
     ext_l, ext_r = s.get("ext_left", 0.0), s.get("ext_right", 0.0)
     fin_l, fin_r = s.get("fin_left", 0.0), s.get("fin_right", 0.0)
     ext_t = s.get("ext_top", 0.0)
-    gg = np.linspace(-89.9, 89.9, 221)
-    el = np.linspace(0.5, 89.5, 150)
-    AZ, EL = np.meshgrid(wall_az + gg, el)
-    GG, _ = np.meshgrid(gg, el)
-    theta, r = np.radians(wall_az + GG), _elev_to_r(EL)
-    tau = 0.99
+    if method == "raycast":
+        boundary = shd.full_shade_boundary
+    elif method == "analitico":
+        boundary = shd.full_shade_boundary_analytic
+    else:
+        boundary = shd.practical_shade_boundary
+    kw = {"coverage": coverage} if boundary is shd.practical_shade_boundary else {}
 
-    def reg(dp, el_, er_, fl, fr):
-        f = shd.shaded_fraction(AZ, EL, wall_az, dp, ww, wh, offset, el_, er_, fl, fr, ext_t, n=31)
-        return f >= tau
+    g, e_comb = boundary(wall_az, depth, ww, wh, offset, ext_l, ext_r, fin_l, fin_r, ext_t, **kw)
+    _, e_oh = boundary(wall_az, depth, ww, wh, offset, ext_l, ext_r, 0.0, 0.0, ext_t, **kw)   # alero solo
+    # aletas solas: región de BAJA elevación (cierre HSA + escape de la aleta), forma cerrada por lado
+    a = np.radians(np.abs(g))
+    fin_s = np.where(g >= 0.0, fin_r, fin_l)
+    with np.errstate(invalid="ignore", divide="ignore"):
+        cutoff = np.degrees(np.arctan(ww / np.where(fin_s > 0.0, fin_s, np.nan)))
+        e_esc = np.degrees(np.arctan(ext_t * np.sin(a) / ww))
 
-    r_oh = reg(depth, ext_l, ext_r, 0.0, 0.0)        # alero solo
-    r_fin = reg(0.0, 0.0, 0.0, fin_l, fin_r)         # aletas solas (sin alero)
-    r_comb = reg(depth, ext_l, ext_r, fin_l, fin_r)  # combinación
-    r_tg = r_comb & ~(r_oh | r_fin)                  # solo combinados
-    for region, (col, lab) in zip((r_oh, r_fin, r_tg), _DECOMP):
-        if region.any():
-            ax.contourf(theta, r, region.astype(float), levels=[0.5, 2.0], colors=[col], alpha=0.35, zorder=0)
+    theta = np.radians(wall_az + g)
+    has = e_comb < 89.5
+    r_comb = np.where(has, _elev_to_r(e_comb), 0.0)
+    r_oh = np.where(e_oh < 89.5, np.minimum(_elev_to_r(e_oh), r_comb), 0.0)
+    fins_apply = has & (np.abs(g) >= cutoff) & (fin_s > 0.0) & (e_esc > e_comb)
+    r_fin_in = np.where(fins_apply, np.minimum(_elev_to_r(e_esc), r_comb), r_comb)
+
+    ax.fill_between(theta, 0.0, r_comb, color="#2ca02c", alpha=0.30, zorder=0)        # solo combinados (base)
+    ax.fill_between(theta, r_fin_in, r_comb, color="#7d3c98", alpha=0.35, zorder=0)   # aletas solas (banda baja)
+    ax.fill_between(theta, 0.0, r_oh, color="#e07b39", alpha=0.40, zorder=0)          # alero solo (casquete)
+    ax.plot(theta, np.where(has, r_comb, np.nan), color="#1696a8", lw=1.0, zorder=1)  # borde = máscara seleccionada
+    for col, lab in _DECOMP:
         ax.plot([], [], color=col, lw=6, alpha=0.5, label=lab)
     _mark_device_angles(ax, wall_az, depth, ww, wh, offset, ext_l, ext_r, fin_l, fin_r)
 
