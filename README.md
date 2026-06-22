@@ -34,6 +34,9 @@ uv run pytest                    # corre los tests (valida contra pvlib)
 uv run shiny run app.py          # app de desarrollo en http://127.0.0.1:8000
 ```
 
+La suite de pruebas (posición solar, geometría y sombreado) está documentada en
+[`TESTS.md`](TESTS.md).
+
 ### Exportar el sitio estático (como en producción)
 
 ```bash

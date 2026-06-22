@@ -29,19 +29,27 @@ app_ui = ui.page_sidebar(
                         choices={"pizarra": "Pizarra", "oscuro": "Oscuro", "claro": "Claro"},
                         selected="pizarra"),
         ui.hr(),
-        ui.input_checkbox("show_shading", "Protección: alero horizontal", value=True),
+        ui.input_checkbox("show_shading", "Protección solar (celosía)", value=True),
         ui.panel_conditional(
             "input.show_shading",
             ui.input_numeric("wall_az", "Orientación de la ventana (azimut °)",
                              value=180, min=0, max=360, step=5),
-            ui.input_numeric("depth", "Profundidad del alero (m)", value=0.6, min=0, max=3, step=0.05),
             ui.input_numeric("win_h", "Alto de la ventana (m)", value=1.5, min=0.3, max=3, step=0.1),
             ui.input_numeric("win_w", "Ancho de la ventana (m)", value=1.2, min=0.3, max=4, step=0.1),
-            ui.input_numeric("ext_left", "Extensión del alero · izquierda (m)",
+            ui.tags.small("Alero horizontal", class_="text-muted fw-bold"),
+            ui.input_numeric("depth", "Profundidad del alero (m)", value=0.6, min=0, max=3, step=0.05),
+            ui.input_numeric("ext_left", "Extensión alero · izquierda (m)",
                              value=0.0, min=0, max=2, step=0.1),
-            ui.input_numeric("ext_right", "Extensión del alero · derecha (m)",
+            ui.input_numeric("ext_right", "Extensión alero · derecha (m)",
                              value=0.0, min=0, max=2, step=0.1),
             ui.input_numeric("offset", "Alero sobre el dintel (m)", value=0.0, min=0, max=1.5, step=0.05),
+            ui.tags.small("Parasol vertical (aletas)", class_="text-muted fw-bold"),
+            ui.input_numeric("fin_left", "Aleta izquierda · profundidad (m)",
+                             value=0.0, min=0, max=2, step=0.05),
+            ui.input_numeric("fin_right", "Aleta derecha · profundidad (m)",
+                             value=0.0, min=0, max=2, step=0.05),
+            ui.input_numeric("ext_top", "Extensión aletas · arriba (m)",
+                             value=0.0, min=0, max=2, step=0.1),
         ),
         title="Controles",
         width=300,
@@ -139,7 +147,9 @@ def server(input, output, session):
             spec = {"wall_az": n(input.wall_az(), 180.0), "depth": n(input.depth(), 0.6),
                     "window_h": n(input.win_h(), 1.5), "window_w": n(input.win_w(), 1.2),
                     "ext_left": n(input.ext_left(), 0.0), "ext_right": n(input.ext_right(), 0.0),
-                    "offset": n(input.offset(), 0.0)}
+                    "offset": n(input.offset(), 0.0),
+                    "fin_left": n(input.fin_left(), 0.0), "fin_right": n(input.fin_right(), 0.0),
+                    "ext_top": n(input.ext_top(), 0.0)}
         return (latitude(), current_dt(), spec)
 
     # Un solo snapshot "debounced": todo se recalcula al SOLTAR (tras una breve pausa),
@@ -159,13 +169,15 @@ def server(input, output, session):
     def window_diagram():
         s = snap()
         if s is None or s[2] is None:
-            return _placeholder("Activa el alero para ver la sombra en la ventana")
+            return _placeholder("Activa la protección para ver la sombra en la ventana")
         lat, dt, spec = s
         sun = sun_at(dt, lat, 0.0)
         return render_window_shadow(spec["wall_az"], spec["depth"], spec["window_h"],
                                     spec["window_w"], spec["offset"],
                                     sun["azimuth"], sun["apparent_elevation"],
-                                    ext_left=spec["ext_left"], ext_right=spec["ext_right"])
+                                    ext_left=spec["ext_left"], ext_right=spec["ext_right"],
+                                    fin_left=spec["fin_left"], fin_right=spec["fin_right"],
+                                    ext_top=spec["ext_top"])
 
 
 app = App(app_ui, server)

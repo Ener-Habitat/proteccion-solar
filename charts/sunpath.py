@@ -168,6 +168,37 @@ def _selected_day(ax, date_iso, lat, lon):
                     ha="center", va="center", xytext=(0, 7), textcoords="offset points", zorder=6)
 
 
+def _smooth2d(a, passes=2):
+    """Promedio 3×3 de un campo 2D (atenúa el ruido del muestreo de la ventana)."""
+    for _ in range(passes):
+        b = a.copy()
+        b[1:-1, 1:-1] = (a[1:-1, 1:-1] + a[:-2, 1:-1] + a[2:, 1:-1]
+                         + a[1:-1, :-2] + a[1:-1, 2:]) / 5.0
+        a = b
+    return a
+
+
+_THR = 0.95
+
+
+def _full_shade_field(s, gg, el, n=21, chunk=14):
+    """Campo de fracción sombreada de la celosía sobre la malla (``el`` × ``gg``), ensamblado
+    por bloques de azimut (memoria acotada en Pyodide) y suavizado en 2D para quitar el ruido
+    del muestreo de la ventana → contorno limpio."""
+    wall_az, depth, ww, wh = s["wall_az"], s["depth"], s["window_w"], s["window_h"]
+    offset, ext_l, ext_r = s.get("offset", 0.0), s.get("ext_left", 0.0), s.get("ext_right", 0.0)
+    fin_l, fin_r = s.get("fin_left", 0.0), s.get("fin_right", 0.0)
+    ext_t = s.get("ext_top", 0.0)
+
+    frac = np.empty((el.size, gg.size))
+    for i0 in range(0, gg.size, chunk):
+        sl = slice(i0, i0 + chunk)
+        AZ, EL = np.meshgrid(wall_az + gg[sl], el)
+        frac[:, sl] = shd.shaded_fraction(AZ, EL, wall_az, depth, ww, wh, offset, ext_l, ext_r,
+                                          fin_l, fin_r, ext_t, n=n)
+    return _smooth2d(frac, passes=6)
+
+
 def _overhang_mask(ax, s):
     """Máscara de **sombra total real** del alero finito sobre la estereográfica, con los
     ángulos característicos marcados.
@@ -182,54 +213,65 @@ def _overhang_mask(ax, s):
     depth, ww, wh = s["depth"], s["window_w"], s["window_h"]
     offset = s.get("offset", 0.0)
     ext_l, ext_r = s.get("ext_left", 0.0), s.get("ext_right", 0.0)
+    fin_l, fin_r = s.get("fin_left", 0.0), s.get("fin_right", 0.0)
+    has_fins = fin_l > 0 or fin_r > 0
 
-    if depth > 0:
-        # Frontera analítica de la región de sombra TOTAL: para cada HSA (γ), la elevación
-        # mínima α(γ) que cumple a la vez el corte vertical (alero) y el lateral (extensión).
+    if has_fins:
+        # Celosía: región de sombra TOTAL (sin fórmula cerrada). Campo suavizado + contorno,
+        # que traza el quiebre (γ=0) de forma continua.
+        gg = np.linspace(-89.9, 89.9, 221)
+        el = np.linspace(0.5, 90.0, 220)
+        frac = _full_shade_field(s, gg, el, chunk=12)
+        if frac.max() >= _THR:
+            GG, EL = np.meshgrid(gg, el)
+            theta, r = np.radians(wall_az + GG), _elev_to_r(EL)
+            ax.contourf(theta, r, frac, levels=[_THR, 2.0], colors=[_SHADE_COLOR], alpha=0.20, zorder=0)
+            ax.contour(theta, r, frac, levels=[_THR], colors=["#1696a8"], linewidths=1.0, zorder=1)
+    elif depth > 0:
+        # Sólo alero: frontera analítica (rápida). Para cada HSA (γ), la elevación mínima α(γ)
+        # que cumple a la vez el corte vertical (alero) y el lateral (extensión).
         g = np.linspace(-89.9, 89.9, 181)
         gr = np.radians(g)
         top = wh + offset
         vsa_cut = shd.overhang_full_shade_vsa(depth, wh, offset)
         elev_vert = np.degrees(np.arctan(np.tan(np.radians(vsa_cut)) * np.cos(gr)))
-
         ext_side = np.where(g >= 0.0, ext_r, ext_l)
-        num = top * np.abs(np.sin(gr))                    # desplazamiento lateral en el antepecho
+        num = top * np.abs(np.sin(gr))
         with np.errstate(divide="ignore", invalid="ignore"):
             elev_lat = np.degrees(np.arctan(num / ext_side))
-        elev_lat = np.where(num < 1e-9, 0.0, elev_lat)                          # γ=0: sin desfase
-        elev_lat = np.where((ext_side <= 1e-9) & (num >= 1e-9), 90.0, elev_lat)  # sin extensión: no cubre
-
+        elev_lat = np.where(num < 1e-9, 0.0, elev_lat)
+        elev_lat = np.where((ext_side <= 1e-9) & (num >= 1e-9), 90.0, elev_lat)
         elev_min = np.clip(np.maximum(elev_vert, elev_lat), 0.0, 90.0)
-        theta = np.radians(wall_az + g)
-        r = _elev_to_r(elev_min)
+        theta, r = np.radians(wall_az + g), _elev_to_r(elev_min)
         ax.fill_between(theta, 0.0, r, color=_SHADE_COLOR, alpha=0.20, zorder=0)
         ax.plot(theta, np.where(elev_min >= 89.5, np.nan, r), color="#1696a8", lw=1.0, zorder=1)
 
-    _mark_device_angles(ax, wall_az, depth, ww, wh, offset, ext_l, ext_r)
+    _mark_device_angles(ax, wall_az, depth, ww, wh, offset, ext_l, ext_r, fin_l, fin_r)
 
 
-def _mark_device_angles(ax, wall_az, depth, ww, wh, offset, ext_l, ext_r):
-    """Marca en la estereográfica los ángulos de corte del alero: VSA (profundidad) y los
-    HSA laterales (extensiones)."""
-    if depth <= 0:
-        return
-    vsa = shd.overhang_full_shade_vsa(depth, wh, offset)
-    hsa_l = shd.lateral_cutoff_hsa(ext_l, depth)
-    hsa_r = shd.lateral_cutoff_hsa(ext_r, depth)
+def _hsa_line(ax, wall_az, sign, hsa, label):
+    th = np.radians(wall_az + sign * hsa)
+    ax.plot([th, th], [0.0, 1.0], color="#1696a8", lw=0.9, ls="--", alpha=0.8, zorder=2)
+    ax.annotate(label, (th, 0.9), fontsize=6.5, color="#0d7a8a", ha="center", va="center", zorder=6,
+                bbox=dict(boxstyle="round,pad=0.12", fc="white", ec="#1696a8", lw=0.5, alpha=0.85))
 
-    # VSA: vértice inferior de la zona (azimut de la pared, elevación = VSA de corte).
-    ax.annotate(f"VSA {vsa:.0f}°", (np.radians(wall_az), _elev_to_r(vsa)),
-                fontsize=8, color="#0d7a8a", ha="center", va="center",
-                bbox=dict(boxstyle="round,pad=0.15", fc="white", ec="#1696a8", lw=0.6, alpha=0.85),
-                zorder=6)
 
-    # HSA laterales: líneas radiales en azimut_pared ± HSA, con su etiqueta junto al borde.
-    for sign, hsa, lbl in ((+1, hsa_r, "der."), (-1, hsa_l, "izq.")):
-        th = np.radians(wall_az + sign * hsa)
-        ax.plot([th, th], [0.0, 1.0], color="#1696a8", lw=0.9, ls="--", alpha=0.8, zorder=2)
-        ax.annotate(f"HSA {hsa:.0f}°\n{lbl}", (th, 0.9), fontsize=6.5, color="#0d7a8a",
-                    ha="center", va="center", zorder=6,
-                    bbox=dict(boxstyle="round,pad=0.12", fc="white", ec="#1696a8", lw=0.5, alpha=0.85))
+def _mark_device_angles(ax, wall_az, depth, ww, wh, offset, ext_l, ext_r, fin_l=0.0, fin_r=0.0):
+    """Marca los ángulos de corte: VSA del alero (profundidad) y, por cada lado, el HSA de la
+    aleta (si la hay) o el del alero por su extensión."""
+    if depth > 0:
+        vsa = shd.overhang_full_shade_vsa(depth, wh, offset)
+        ax.annotate(f"VSA {vsa:.0f}°", (np.radians(wall_az), _elev_to_r(vsa)),
+                    fontsize=8, color="#0d7a8a", ha="center", va="center",
+                    bbox=dict(boxstyle="round,pad=0.15", fc="white", ec="#1696a8", lw=0.6, alpha=0.85),
+                    zorder=6)
+    for sign, fin, ext, lbl in ((+1, fin_r, ext_r, "der."), (-1, fin_l, ext_l, "izq.")):
+        if fin > 0:                                  # domina la aleta: HSA = arctan(ancho/prof)
+            hsa = shd.fin_full_shade_hsa(fin, ww)
+            _hsa_line(ax, wall_az, sign, hsa, f"HSA aleta\n{hsa:.0f}° {lbl}")
+        elif depth > 0:                              # sólo alero: HSA por su extensión
+            hsa = shd.lateral_cutoff_hsa(ext, depth)
+            _hsa_line(ax, wall_az, sign, hsa, f"HSA {hsa:.0f}°\n{lbl}")
 
 
 def _plot_current(ax, lat, lon, current_dt):

@@ -42,12 +42,14 @@ def _angle_arc(ax, center, theta1, theta2, radius, label, lab_r=1.5):
 
 def render_window_shadow(wall_az: float, depth: float, window_h: float, window_w: float,
                          offset: float, sun_az: float, sun_elev: float, ext_left: float = 0.0,
-                         ext_right: float = 0.0):
-    """Esquema alineado (planta + sección + alzado) con la sombra real del alero finito."""
+                         ext_right: float = 0.0, fin_left: float = 0.0, fin_right: float = 0.0,
+                         ext_top: float = 0.0):
+    """Esquema alineado (planta + sección + alzado) con la sombra real de la celosía."""
     lit = shd.illuminated(sun_az, sun_elev, wall_az)
     vsa = float(shd.vertical_shadow_angle(sun_az, sun_elev, wall_az)) if lit else float("nan")
     X, Y, blocked = shd.window_shade_grid(wall_az, depth, window_w, window_h, offset,
-                                          ext_left, ext_right, sun_az, sun_elev)
+                                          ext_left, ext_right, sun_az, sun_elev,
+                                          fin_left, fin_right, ext_top)
     frac = float(blocked.mean()) if lit else 0.0
     shadow_y = float(np.clip((window_h + offset) - depth * np.tan(np.radians(vsa)), 0, window_h)) if lit else window_h
 
@@ -60,7 +62,7 @@ def render_window_shadow(wall_az: float, depth: float, window_h: float, window_w
     fig, ax = plt.subplots(figsize=(10.5, 5.2))
 
     _alzado(ax, X, Y, blocked, lit, window_w, window_h, top, xL, xR, ext_left, ext_right)
-    _planta(ax, depth, window_w, ext_left, ext_right, xL, xR, py0)
+    _planta(ax, depth, window_w, ext_left, ext_right, xL, xR, py0, fin_left, fin_right)
     _seccion(ax, depth, window_h, top, shadow_y, lit, sx0)
 
     ax.set_aspect("equal")
@@ -108,31 +110,42 @@ def _alzado(ax, X, Y, blocked, lit, window_w, window_h, top, xL, xR, ext_left, e
     ax.text(window_w / 2, -0.46, "Alzado (frente)", fontsize=9, ha="center", va="center", color="#444")
 
 
-def _planta(ax, depth, window_w, ext_left, ext_right, xL, xR, py0):
-    """Vista superior (arriba del alzado) con los HSA laterales."""
+def _planta(ax, depth, window_w, ext_left, ext_right, xL, xR, py0, fin_left=0.0, fin_right=0.0):
+    """Vista superior (arriba del alzado): alero (rectángulo), aletas (a los costados) y los
+    ángulos HSA (de la aleta si la hay, o del alero por su extensión)."""
     if depth > 0:
         ax.add_patch(mp.Rectangle((xL, py0), xR - xL, depth, facecolor="#eceff1",
                                   edgecolor=_WALL, lw=1.2, zorder=2))
     ax.plot([xL - 0.25, xR + 0.25], [py0, py0], color=_WALL, lw=2.5, zorder=3)
     ax.plot([0, window_w], [py0, py0], color=_GLASS, lw=6, solid_capstyle="butt", zorder=4)  # ventana
-    # Cota de profundidad (vertical).
-    if depth > 0:
+    top_y = py0 + max(depth, fin_left, fin_right)
+
+    if depth > 0:                                    # cota de profundidad del alero
         xd = xL - 0.16
         ax.annotate("", (xd, py0), (xd, py0 + depth), arrowprops=dict(arrowstyle="<->", color="#888", lw=0.8))
         ax.text(xd - 0.06, py0 + depth / 2, f"prof. {depth:.2f}", fontsize=6.5, color="#666",
                 ha="center", va="center", rotation=90)
-    # HSA laterales: ángulo en el borde de la ventana entre el saliente (+y) y el canto del alero.
-    if depth > 0:
-        for sign, edge_x, ext, lbl in ((+1, window_w, ext_right, "der."), (-1, 0.0, ext_left, "izq.")):
-            if ext <= 0:
-                continue
+
+    for sign, edge_x, ext, fin, lbl in ((+1, window_w, ext_right, fin_right, "der."),
+                                        (-1, 0.0, ext_left, fin_left, "izq.")):
+        if fin > 0:
+            # Aleta vertical: sale del borde de la ventana; HSA = arctan(ancho/profundidad).
+            ax.plot([edge_x, edge_x], [py0, py0 + fin], color=_WALL, lw=4,
+                    solid_capstyle="round", zorder=5)
+            far = window_w - edge_x                  # borde opuesto de la ventana
+            hsa = np.degrees(np.arctan(window_w / fin))
+            ax.plot([edge_x, far], [py0 + fin, py0], color=_ANG, lw=1.3, ls="--", zorder=5)
+            line_ang = np.degrees(np.arctan2(-fin, far - edge_x)) % 360
+            _angle_arc(ax, (edge_x, py0 + fin), *sorted((line_ang, 270.0)), radius=0.4 * fin,
+                       label=f"HSA aleta\n{hsa:.0f}° {lbl}", lab_r=1.9)
+        elif depth > 0 and ext > 0:                  # sólo alero con extensión
             hsa = np.degrees(np.arctan(ext / depth))
             ax.plot([edge_x, edge_x + sign * ext], [py0, py0 + depth], color=_ANG, lw=1.4, ls="--", zorder=5)
             line_ang = np.degrees(np.arctan2(depth, sign * ext))
-            t1, t2 = (line_ang, 90.0) if sign > 0 else (90.0, line_ang)
-            _angle_arc(ax, (edge_x, py0), t1, t2, 0.36 * depth, f"HSA {hsa:.0f}° {lbl}", lab_r=1.7)
-    ax.text(window_w / 2, py0 + depth + 0.22, "Planta (HSA laterales)", fontsize=9,
-            ha="center", va="center", color="#444")
+            _angle_arc(ax, (edge_x, py0), *sorted((line_ang, 90.0)), radius=0.36 * depth,
+                       label=f"HSA {hsa:.0f}° {lbl}", lab_r=1.7)
+
+    ax.text(window_w / 2, top_y + 0.22, "Planta (HSA)", fontsize=9, ha="center", va="center", color="#444")
 
 
 def _seccion(ax, depth, window_h, top, shadow_y, lit, sx0):

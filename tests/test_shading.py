@@ -123,6 +123,66 @@ def test_shaded_fraction_vectorized_and_grid_agree():
     assert abs(blocked.mean() - f_scalar) < 0.03
 
 
+def test_fin_full_shade_hsa_geometry():
+    from solar.shading import fin_full_shade_hsa
+    # ancho 1.2, profundidad 0.6 → arctan(2) ≈ 63.43°; sin aleta → 90°.
+    assert abs(fin_full_shade_hsa(0.6, 1.2) - np.degrees(np.arctan(2))) < 1e-9
+    assert fin_full_shade_hsa(0.0, 1.2) == 90.0
+
+
+def test_vertical_fin_shades_side_sun():
+    """Una aleta del lado por el que incide el Sol aumenta la sombra; la del lado contrario no."""
+    base = shaded_fraction(235.0, 45.0, SOUTH, 0.4, 1.2, 1.5)            # γ>0 (Sol a la der.)
+    con_der = shaded_fraction(235.0, 45.0, SOUTH, 0.4, 1.2, 1.5, fin_right=0.6)
+    con_izq = shaded_fraction(235.0, 45.0, SOUTH, 0.4, 1.2, 1.5, fin_left=0.6)
+    assert con_der > base
+    assert abs(con_izq - base) < 1e-9    # la aleta izquierda no ayuda con Sol por la derecha
+
+
+def test_vertical_extension_helps_high_side_sun():
+    """La extensión vertical de la aleta cubre el Sol más alto de costado."""
+    sin_ext = shaded_fraction(235.0, 68.0, SOUTH, 0.4, 1.2, 1.5, fin_right=0.6)
+    con_ext = shaded_fraction(235.0, 68.0, SOUTH, 0.4, 1.2, 1.5, fin_right=0.6, ext_top=0.8)
+    assert con_ext >= sin_ext
+
+
+def test_raycast_matches_analytic_vsa_arc():
+    """Validación (reporte): el ray casting (shaded_fraction) recupera el arco VSA analítico
+    en el límite de alero ancho. A γ=0 con extensiones grandes, la ventana pasa a 100%
+    sombreada justo al cruzar VSA = arctan(H/d)."""
+    from solar.shading import overhang_full_shade_vsa
+    depth, wh, ww = 0.6, 1.5, 1.2
+    vsa_cut = overhang_full_shade_vsa(depth, wh)          # arctan(1.5/0.6) ≈ 68.2°
+    f_below = shaded_fraction(SOUTH, vsa_cut - 4, SOUTH, depth, ww, wh, ext_left=3, ext_right=3)
+    f_above = shaded_fraction(SOUTH, vsa_cut + 4, SOUTH, depth, ww, wh, ext_left=3, ext_right=3)
+    assert f_below < 0.95          # antes del corte: la ventana NO está 100% sombreada
+    assert f_above > 0.98          # después del corte: ~100% (recupera el arco)
+
+
+def test_constant_vsa_locus_is_a_circle():
+    """El locus de VSA constante, proyectado en estereográfica, es un círculo (por eso se puede
+    dibujar como arco suave). Ajusto un círculo a la curva y el residual debe ser ~0."""
+    vsa = np.radians(68.2)
+    g = np.radians(np.linspace(-80.0, 80.0, 60))
+    elev = np.arctan(np.tan(vsa) * np.cos(g))            # locus VSA constante (rad)
+    r = np.tan((np.pi / 2 - elev) / 2)                   # radio estereográfico
+    x, y = r * np.sin(g), r * np.cos(g)
+    c, *_ = np.linalg.lstsq(np.c_[2 * x, 2 * y, np.ones_like(x)], x**2 + y**2, rcond=None)
+    cx, cy = c[0], c[1]
+    d = np.sqrt((x - cx) ** 2 + (y - cy) ** 2)           # distancia al centro ajustado
+    assert (d.max() - d.min()) < 1e-6                    # equidistante → círculo
+
+
+def test_adding_device_never_reduces_shade():
+    """Unión (OR): añadir aletas o extensiones nunca reduce la fracción sombreada."""
+    az = np.array([150.0, 180.0, 210.0, 235.0])
+    base = shaded_fraction(az, 45.0, SOUTH, 0.5, 1.2, 1.5)
+    with_fins = shaded_fraction(az, 45.0, SOUTH, 0.5, 1.2, 1.5, fin_left=0.5, fin_right=0.5)
+    with_ext = shaded_fraction(az, 45.0, SOUTH, 0.5, 1.2, 1.5, ext_left=0.5, ext_right=0.5)
+    assert np.all(with_fins >= base - 1e-9)
+    assert np.all(with_ext >= base - 1e-9)
+
+
 def test_tropical_south_window_not_lit_at_summer_noon():
     """En el trópico (Temixco, 18.85°N) a mediodía de verano el Sol está al Norte, así que
     una ventana Sur no recibe sol directo (la intuición del alero sur se invierte)."""

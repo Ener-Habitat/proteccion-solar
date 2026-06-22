@@ -91,49 +91,84 @@ def lateral_cutoff_hsa(ext: float, depth: float) -> float:
     return float(np.degrees(np.arctan(ext / depth)))
 
 
+def fin_full_shade_hsa(fin_depth: float, window_w: float) -> float:
+    """HSA de corte de una aleta vertical: ``arctan(ancho / profundidad)`` (grados).
+
+    Es el dual del VSA del alero: para |γ| ≥ este ángulo (Sol suficientemente de costado),
+    la aleta de ese lado sombrea toda la ventana en horizontal.
+    """
+    if fin_depth <= 0:
+        return 90.0
+    return float(np.degrees(np.arctan(window_w / fin_depth)))
+
+
+def _blocked(XX, YY, g_deg, tan_vsa, depth, window_w, window_h, offset, ext_left, ext_right,
+             fin_left=0.0, fin_right=0.0, ext_top=0.0):
+    """¿Está cada punto (XX, YY) de la ventana en sombra? Une el **alero horizontal** y las
+    **aletas verticales** (celosía). Broadcasting: ``g_deg``/``tan_vsa`` pueden ser escalares
+    o arrays; XX, YY la malla de la ventana.
+    """
+    tan_g = np.tan(np.radians(g_deg))
+    # Alero horizontal: el rayo cruza el plano del alero a distancia oc; bloquea bajo él.
+    with np.errstate(invalid="ignore", divide="ignore"):
+        oc = (window_h + offset - YY) / tan_vsa
+        shift = oc * tan_g
+    blk = (oc >= 0.0) & (oc <= depth) & (XX + shift >= -ext_left) & (XX + shift <= window_w + ext_right)
+
+    # Aletas verticales (cada una en un borde): el rayo cruza el plano de la aleta a oc; bloquea
+    # si cae dentro de su profundidad y bajo su borde superior (window_h+ext_top). No se extiende
+    # hacia abajo: el Sol está sobre el horizonte, así que el rayo asciende y nunca cruza la aleta
+    # por debajo del punto de la ventana.
+    fin_top, fin_bot = window_h + ext_top, 0.0
+    with np.errstate(invalid="ignore", divide="ignore"):
+        oc_l = np.where(tan_g < 0.0, -XX / tan_g, np.inf)              # aleta izq. (x=0), Sol por la izq.
+        oc_r = np.where(tan_g > 0.0, (window_w - XX) / tan_g, np.inf)  # aleta der. (x=W), Sol por la der.
+        y_l = YY + oc_l * tan_vsa
+        y_r = YY + oc_r * tan_vsa
+    if fin_left > 0:
+        blk = blk | ((oc_l >= 0.0) & (oc_l <= fin_left) & (y_l >= fin_bot) & (y_l <= fin_top))
+    if fin_right > 0:
+        blk = blk | ((oc_r >= 0.0) & (oc_r <= fin_right) & (y_r >= fin_bot) & (y_r <= fin_top))
+    return blk
+
+
 def shaded_fraction(sun_azimuth, sun_elevation, wall_azimuth, depth: float,
                     window_w: float, window_h: float, offset: float = 0.0,
-                    ext_left: float = 0.0, ext_right: float = 0.0, ny: int = 31):
-    """Fracción [0,1] del **área** de la ventana sombreada por un alero horizontal de ancho
-    finito, proyectando correctamente su geometría (con desplazamiento lateral).
+                    ext_left: float = 0.0, ext_right: float = 0.0,
+                    fin_left: float = 0.0, fin_right: float = 0.0,
+                    ext_top: float = 0.0, n: int = 21):
+    """Fracción [0,1] del **área** de la ventana sombreada por la celosía (alero + aletas).
 
-    El alero abarca lateralmente desde ``-ext_left`` hasta ``window_w + ext_right`` (extensión
-    independiente a cada lado) y sale ``depth`` desde la pared, a una altura ``window_h +
-    offset`` sobre el antepecho.
-
-    Vectorizado: acepta escalares o arrays de posiciones solares (de cualquier forma).
+    Vectorizado: acepta escalares o arrays de posiciones solares (de cualquier forma). Muestrea
+    una malla ``n × n`` sobre la ventana.
     """
     az = np.asarray(sun_azimuth, dtype=float)
     el = np.asarray(sun_elevation, dtype=float)
     g = wall_solar_azimuth(az, wall_azimuth)
     lit = (el > 0.0) & (np.abs(g) < 89.999)
-
     with np.errstate(invalid="ignore", divide="ignore"):
-        tan_vsa = np.tan(np.radians(el)) / np.cos(np.radians(g))  # = tan(α)/cos(γ)
-        tan_g = np.tan(np.radians(g))
+        tan_vsa = np.tan(np.radians(el)) / np.cos(np.radians(g))
 
-    # Muestreo en altura de la ventana: para cada y, ¿qué tramo en x queda bloqueado?
-    y = np.linspace(0.0, window_h, ny)
-    with np.errstate(invalid="ignore", divide="ignore"):
-        oc = (window_h + offset - y) / tan_vsa[..., None]   # distancia (perpendicular) del cruce
-        shift = oc * tan_g[..., None]                       # desplazamiento lateral de la sombra
-    under = (oc >= 0.0) & (oc <= depth)                     # el rayo pasa bajo el alero
-    lo = np.maximum(0.0, -ext_left - shift)
-    hi = np.minimum(window_w, window_w + ext_right - shift)
-    blocked_len = np.where(under, np.clip(hi - lo, 0.0, window_w), 0.0)
-
-    frac = blocked_len.mean(axis=-1) / window_w
+    X = np.linspace(0.0, window_w, n)
+    Y = np.linspace(0.0, window_h, n)
+    XX, YY = np.meshgrid(X, Y)
+    blk = _blocked(XX, YY, g[..., None, None], tan_vsa[..., None, None],
+                   depth, window_w, window_h, offset, ext_left, ext_right,
+                   fin_left, fin_right, ext_top)
+    frac = blk.mean(axis=(-1, -2))
     frac = np.where(lit, frac, 0.0)
     return float(frac) if np.ndim(az) == 0 else frac
 
 
 def window_shade_grid(wall_azimuth, depth: float, window_w: float, window_h: float,
                       offset: float, ext_left: float, ext_right: float,
-                      sun_azimuth: float, sun_elevation: float, nx: int = 140, ny: int = 140):
+                      sun_azimuth: float, sun_elevation: float,
+                      fin_left: float = 0.0, fin_right: float = 0.0,
+                      ext_top: float = 0.0, nx: int = 140, ny: int = 140):
     """Malla booleana (ny, nx) de los puntos de la ventana en sombra, para el alzado.
 
-    Alero horizontal con extensión lateral independiente a cada lado (``ext_left``,
-    ``ext_right``). Devuelve ``(X, Y, blocked)`` en metros (x a lo ancho, y en altura).
+    Celosía: alero horizontal (``ext_left/right``) + aletas verticales (``fin_left/right`` con
+    extensión superior ``ext_top``). Devuelve ``(X, Y, blocked)`` en metros.
     """
     X = np.linspace(0.0, window_w, nx)
     Y = np.linspace(0.0, window_h, ny)
@@ -142,7 +177,6 @@ def window_shade_grid(wall_azimuth, depth: float, window_w: float, window_h: flo
         return XX, YY, np.zeros_like(XX, dtype=bool)
     g = float(wall_solar_azimuth(sun_azimuth, wall_azimuth))
     tan_vsa = np.tan(np.radians(sun_elevation)) / np.cos(np.radians(g))
-    oc = (window_h + offset - YY) / tan_vsa
-    shift = oc * np.tan(np.radians(g))
-    blocked = (oc >= 0.0) & (oc <= depth) & (XX + shift >= -ext_left) & (XX + shift <= window_w + ext_right)
+    blocked = _blocked(XX, YY, g, tan_vsa, depth, window_w, window_h, offset, ext_left, ext_right,
+                       fin_left, fin_right, ext_top)
     return XX, YY, blocked
