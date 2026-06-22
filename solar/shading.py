@@ -297,15 +297,12 @@ def full_shade_boundary_analytic(wall_azimuth, depth: float, window_w: float, wi
     Mismo contrato que :func:`full_shade_boundary` — devuelve ``(gamma_deg, elev_deg)``; la región
     sombreada es ``elev ≥ elev_deg`` y ``90`` donde no se alcanza el 100%.
 
-    El borde lo fija la **arista inferior** (``y=0``): la ventana queda 100% sombreada cuando el
-    alero (que cubre desde un lado hasta ``P``) y la aleta (que cubre desde ``Q`` hasta el otro)
-    se tocan (``P=Q``). ``elev_full(γ)`` es el **mínimo** sobre los mecanismos de cubrimiento
-    (cada uno una curva analítica), porque añadir un dispositivo solo puede *bajar* el umbral:
-
-    - **alero solo** → :func:`_overhang_only_boundary` (arco de VSA ∪ círculo lateral);
-    - **aleta sola** (ala) → ``γ ≥ arctan(W/fin)`` ⟹ 100% a toda elevación;
-    - **alero+aleta** (``P=Q``) → "curva-razón" ``tan(e)=top·cosγ·sinγ/(fin·sinγ+ext·cosγ)``,
-      con el subrégimen de "escape por encima" de la aleta cuando ``offset>ext_top``.
+    Para cada γ se calcula el umbral de elevación **por fila** ``y`` (en forma cerrada: corte del
+    alero, corte lateral, ``P=Q`` con sus subregímenes de μ, y la fusión con la cobertura de baja
+    elevación de la aleta) y se toma el **máximo sobre las filas** — la fila que liga la sombra
+    total no siempre es la inferior (cuando la aleta domina y ``ext_top`` es chico, la fila crítica
+    sube). Coincide con el ray casting a <~1° (el residual queda en regímenes patológicos de dos
+    intervalos: ``offset>ext_top`` pasado el corte de la aleta, donde el borde es ambiguo).
     """
     g = np.linspace(-89.9, 89.9, n_gamma)
     W, H, top = window_w, window_h, window_h + offset
@@ -316,34 +313,31 @@ def full_shade_boundary_analytic(wall_azimuth, depth: float, window_w: float, wi
     cosa, m = np.cos(a), np.tan(a)
     ext_s = np.where(g >= 0.0, ext_right, ext_left)
     fin_s = np.where(g >= 0.0, fin_right, fin_left)
-    has_fin = fin_s > 0.0
 
-    elev_oh = _overhang_only_boundary(g, depth, W, H, offset, ext_left, ext_right)
-    if depth > 0:
-        t_reach = top / depth                                    # t para que el alero llegue al antepecho
-        elev_vsa = np.degrees(np.arctan((top / depth) * cosa))
-    else:
-        t_reach, elev_vsa = np.inf, np.full_like(g, 90.0)
-
+    # Umbral por FILA y, tomando el MÁXIMO sobre las filas: la fila que liga la sombra total no
+    # siempre es la inferior (cuando la aleta domina y ext_top es chico, la fila crítica sube).
+    Y = np.linspace(0.0, H, 200)
+    m_, ext_, fin_ = m[:, None], ext_s[:, None], fin_s[:, None]
+    top_y = (H + offset) - Y[None, :]               # altura del alero sobre la fila
+    etop_y = (H + ext_top) - Y[None, :]             # alcance vertical disponible de la aleta en la fila
     with np.errstate(invalid="ignore", divide="ignore"):
-        # Ala: la aleta cubre el ancho (γ≥arctan(W/fin)). Es 100% a TODA elevación solo si el
-        # alero tapa arriba (depth>0); sin alero la topología se invierte (intervalo inferior),
-        # fuera del alcance de la curva elev_full → se trata como no representable.
-        wing = has_fin & (m * fin_s >= W * (1.0 - 1e-9)) & (depth > 0.0)
-
-        denom = m * fin_s + ext_s                                # P=Q, subrégimen μ=fin
-        t1 = np.where(denom > 0.0, m * top / denom, np.inf)
-        # tolerancia en el límite de régimen (t1 = (H+ext_top)/fin): el redondeo no debe tirar
-        # el punto a la rama equivocada y crear un pico espurio de un solo γ.
-        mu_fin_ok = t1 <= (H + ext_top) / np.where(fin_s > 0.0, fin_s, np.nan) * (1.0 + 1e-9)
-        t2 = np.where((ext_s > 0.0) & (offset > ext_top),        # subrégimen de escape (μ=(H+ext_top)/t)
-                      m * (offset - ext_top) / np.where(ext_s > 0.0, ext_s, np.nan), np.inf)
-        t_comb_raw = np.where(mu_fin_ok, t1, np.where(offset > ext_top, t2, t_reach))
-        t_comb = np.maximum(t_comb_raw, t_reach)                 # el alero debe alcanzar la arista
-        elev_comb = np.degrees(np.arctan(t_comb * cosa))
-
-    elev = np.where(has_fin, np.minimum(elev_oh, np.maximum(elev_comb, elev_vsa)), elev_oh)
-    elev = np.where(wing, 0.0, elev)
+        t_reach = (top_y / depth) if depth > 0 else np.full_like(top_y, np.inf)   # el alero llega a la fila
+        t_latw = np.where(ext_ > 0.0, m_ * top_y / ext_, np.inf)                  # alero+ext cubre el ancho
+        t_oh = np.maximum(t_reach, t_latw)
+        denom = m_ * fin_ + ext_                                                  # P=Q, subrégimen μ=fin
+        t1 = np.where(denom > 0.0, m_ * top_y / denom, np.inf)
+        reg_bound = np.where(fin_ > 0.0, etop_y / fin_, np.inf)                   # frontera de régimen de μ
+        mu_fin_ok = t1 <= reg_bound * (1.0 + 1e-9)                                # tolerancia anti-spike
+        t2 = np.where((ext_ > 0.0) & (offset > ext_top),                         # P=Q, subrégimen de escape
+                      m_ * (offset - ext_top) / ext_, np.inf)
+        t_cross = np.where(mu_fin_ok, t1, np.where(offset > ext_top, t2, reg_bound))
+        t_high = np.minimum(t_oh, np.maximum(t_reach, t_cross))                   # umbral del intervalo superior
+        # Fusión con la cobertura de BAJA elevación de la aleta (intervalo inferior): si la aleta
+        # cubre el ancho de la fila hasta t_fin y t_fin ≥ t_high, la fila queda cubierta a toda t.
+        t_fin = np.where(m_ * fin_ >= W * (1.0 - 1e-9), m_ * etop_y / W, 0.0)
+        t_row = np.where(t_fin >= t_high * (1.0 - 1e-9), 0.0, t_high)
+        t_star = np.nanmax(t_row, axis=1)                                         # la fila que liga
+        elev = np.degrees(np.arctan(t_star * cosa))
     return g, np.clip(elev, 0.0, 90.0)
 
 

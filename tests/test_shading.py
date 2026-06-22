@@ -325,3 +325,19 @@ def test_practical_boundary_smooth_and_below_strict():
     f = shaded_fraction(SOUTH + g[i], e99[i] + 0.5, SOUTH, 0.6, 1.2, 1.5, 0.0, 0.195, 0.0,
                         0.0, 0.19, 0.4)
     assert f >= 0.99
+
+
+def test_analytic_boundary_hardened_fin_dominant():
+    """El borde cerrado toma el MÁXIMO sobre las filas (no solo la inferior): en configs
+    dominadas por aletas con ext_top=0 —donde la fila crítica NO es la inferior— ya coincide con
+    el ray casting (antes devolvía 'ala'=0 por error)."""
+    cfgs = [
+        dict(depth=0.6, fin_left=0.5, fin_right=0.5, ext_top=0.0),   # simétrica, ext_top=0
+        dict(depth=0.6, fin_left=0.9, fin_right=0.9, ext_top=0.0),   # aletas grandes, ext_top=0
+        dict(depth=0.6, fin_right=0.6, ext_left=0.2, ext_top=0.0),   # asimétrica, ext_top=0
+    ]
+    for k in cfgs:
+        g, e_ray = full_shade_boundary(*_boundary_args(k))
+        _, e_ana = full_shade_boundary_analytic(*_boundary_args(k))
+        sig = (e_ray < 89.5) & (e_ray > 1.0)
+        assert np.max(np.abs(e_ana - e_ray)[sig]) < 0.5
