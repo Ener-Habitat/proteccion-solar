@@ -121,14 +121,15 @@ app_ui = ui.page_navbar(
             ),
         ),
     ),
-    ui.nav_panel(
-        "Metodología",
-        ui.div(
-            ui.markdown(METHODOLOGY_MD),
-            class_="mx-auto p-3",
-            style="max-width: 920px;",
-        ),
-    ),
+    # Pestaña de Metodología comentada (re-activar quitando los comentarios; requiere docs/ en el export):
+    # ui.nav_panel(
+    #     "Metodología",
+    #     ui.div(
+    #         ui.markdown(METHODOLOGY_MD),
+    #         class_="mx-auto p-3",
+    #         style="max-width: 920px;",
+    #     ),
+    # ),
     title="Protección solar · trayectoria y diseño de aleros",
     id="maintab",
 )
