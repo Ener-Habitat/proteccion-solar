@@ -4,8 +4,11 @@ import numpy as np
 
 from solar.geometry import sun_at
 from solar.shading import (
+    fin_full_shade_hsa,
     full_shade_boundary,
+    full_shade_boundary_analytic,
     illuminated,
+    practical_shade_boundary,
     lateral_cutoff_hsa,
     overhang_full_shade_vsa,
     overhang_mask_curve,
@@ -250,3 +253,75 @@ def test_full_shade_boundary_is_true_locus_and_smooth():
     # Suavidad: segunda diferencia pequeña en la zona central (lejos del corte HSA de la aleta).
     center = np.abs(g) <= 50.0
     assert np.nanmax(np.abs(np.diff(elev[center], 2))) < 1.0
+
+
+# --- Borde 100% en forma cerrada (metodología analítica) ---
+
+_ANA_CFGS = [
+    dict(depth=0.6, ext_left=3.0, ext_right=3.0),                                   # solo alero
+    dict(depth=0.6, fin_right=0.5, ext_right=0.3, ext_top=0.4),                     # aleta única
+    dict(depth=0.6, fin_left=0.5, fin_right=0.5, ext_top=0.4),                      # celosía simétrica
+    dict(depth=0.5, offset=0.2, ext_left=0.2, fin_left=0.3, fin_right=0.5, ext_top=0.3),  # asimétrica
+    dict(depth=0.6, fin_left=0.6, fin_right=0.6, ext_top=0.8),                      # ext_top>offset
+]
+
+
+def _boundary_args(k):
+    return (SOUTH, k.get("depth", 0.6), 1.2, 1.5, k.get("offset", 0.0),
+            k.get("ext_left", 0.0), k.get("ext_right", 0.0),
+            k.get("fin_left", 0.0), k.get("fin_right", 0.0), k.get("ext_top", 0.0))
+
+
+def test_analytic_boundary_matches_raycasting():
+    """El borde en forma cerrada coincide con el ray casting (ground truth) en la región
+    significativa (excluye el riel 90° y el piso ~horizonte del ala, donde el ray casting topa
+    con su bisección y el analítico es de hecho más exacto)."""
+    for k in _ANA_CFGS:
+        g, e_ray = full_shade_boundary(*_boundary_args(k))
+        _, e_ana = full_shade_boundary_analytic(*_boundary_args(k))
+        sig = (e_ray < 89.5) & (e_ray > 1.0)
+        assert np.max(np.abs(e_ana - e_ray)[sig]) < 0.3
+
+
+def test_analytic_boundary_is_true_locus():
+    """El borde analítico es el locus real de sombra 100%: justo dentro está totalmente
+    sombreada; bien afuera, no. (Valida la hipótesis de la arista inferior contra área densa.)"""
+    k = dict(depth=0.6, fin_left=0.5, fin_right=0.5, ext_top=0.4)
+    g, e = full_shade_boundary_analytic(*_boundary_args(k))
+    for gi in (-20.0, 0.0, 25.0):                       # zona central (transición nítida)
+        i = int(np.argmin(np.abs(g - gi)))
+        e0 = e[i]
+        assert _frac(SOUTH + g[i], min(e0 + 2.0, 89.9), k) >= 0.999
+        assert _frac(SOUTH + g[i], e0 - 5.0, k) < 0.99
+
+
+def test_analytic_boundary_regimes_and_edges():
+    """Reducción al alero sin aletas; alas (γ≥arctan(W/fin)→sombra total); sin NaN/inf y suave."""
+    # Sin aletas: idéntico al borde solo-alero (mismo helper cerrado).
+    g, e_ana = full_shade_boundary_analytic(SOUTH, 0.6, 1.2, 1.5, ext_left=0.3, ext_right=0.3)
+    _, e_oh = full_shade_boundary(SOUTH, 0.6, 1.2, 1.5, ext_left=0.3, ext_right=0.3)
+    assert np.max(np.abs(e_ana - e_oh)) < 0.05
+    # Alas: pasado el corte HSA de la aleta, sombra total (elev→0).
+    g, e = full_shade_boundary_analytic(SOUTH, 0.6, 1.2, 1.5, fin_left=0.5, fin_right=0.5, ext_top=0.4)
+    cut = fin_full_shade_hsa(0.5, 1.2)                  # ≈67.4°
+    assert np.all(e[np.abs(g) >= cut + 2.0] < 0.6)
+    # Salida finita y suave en el centro (sin NaN/inf, sin sierra).
+    assert np.all(np.isfinite(e))
+    assert np.nanmax(np.abs(np.diff(e[np.abs(g) <= 50.0], 2))) < 1.0
+
+
+def test_practical_boundary_smooth_and_below_strict():
+    """El borde práctico (99% de área) nunca exige más elevación que el 100% estricto y es
+    **suave** incluso en configs asimétricas que hacen *saltar* el estricto (aleta somera +
+    extensión del lado opuesto)."""
+    args = (SOUTH, 0.6, 1.2, 1.5, 0.0, 0.195, 0.0, 0.0, 0.19, 0.4)
+    g, e99 = practical_shade_boundary(*args, coverage=0.99)
+    _, e100 = full_shade_boundary_analytic(*args)
+    real = e100 > 1.0                                       # excluye las alas (estricto→0, práctico→piso)
+    assert np.all(e99[real] <= e100[real] + 1e-6)           # práctico ≤ estricto
+    center = np.abs(g) <= 40.0
+    assert np.nanmax(np.abs(np.diff(e99[center]))) < 5.0    # sin el salto (~15°) del estricto
+    i = int(np.argmin(np.abs(g - 10.0)))                    # donde dibuja, el área es ≥ 99%
+    f = shaded_fraction(SOUTH + g[i], e99[i] + 0.5, SOUTH, 0.6, 1.2, 1.5, 0.0, 0.195, 0.0,
+                        0.0, 0.19, 0.4)
+    assert f >= 0.99

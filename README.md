@@ -35,7 +35,9 @@ uv run shiny run app.py          # app de desarrollo en http://127.0.0.1:8000
 ```
 
 La suite de pruebas (posición solar, geometría y sombreado) está documentada en
-[`TESTS.md`](TESTS.md).
+[`TESTS.md`](TESTS.md). La **metodología analítica** del borde de sombra 100% (alero, aleta y
+celosía completa en forma cerrada, validada contra el ray casting) está en
+[`docs/metodologia-sombra.md`](docs/metodologia-sombra.md).
 
 ### Exportar el sitio estático (como en producción)
 

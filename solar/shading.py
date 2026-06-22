@@ -218,6 +218,29 @@ def window_shade_grid(wall_azimuth, depth: float, window_w: float, window_h: flo
     return XX, YY, blocked
 
 
+def _overhang_only_boundary(g, depth, window_w, window_h, offset, ext_left, ext_right):
+    """Borde de sombra 100% (forma cerrada) para **solo alero** (sin aletas).
+
+    Para cada HSA ``g`` (grados), la elevación mínima de sombra total = máximo del **arco de VSA
+    constante** (corte por profundidad) y del **círculo de corte lateral** (la extensión deja de
+    cubrir el costado). Ambos son curvas exactas en la estereográfica.
+    """
+    gr = np.radians(g)
+    top = window_h + offset
+    if depth > 0:
+        vsa_cut = overhang_full_shade_vsa(depth, window_h, offset)
+        elev_vert = np.degrees(np.arctan(np.tan(np.radians(vsa_cut)) * np.cos(gr)))
+    else:
+        elev_vert = np.full_like(g, 90.0)
+    ext_side = np.where(g >= 0.0, ext_right, ext_left)
+    num = top * np.abs(np.sin(gr))
+    with np.errstate(divide="ignore", invalid="ignore"):
+        elev_lat = np.degrees(np.arctan(num / ext_side))
+    elev_lat = np.where(num < 1e-9, 0.0, elev_lat)
+    elev_lat = np.where((ext_side <= 1e-9) & (num >= 1e-9), 90.0, elev_lat)
+    return np.clip(np.maximum(elev_vert, elev_lat), 0.0, 90.0)
+
+
 def full_shade_boundary(wall_azimuth, depth: float, window_w: float, window_h: float,
                         offset: float = 0.0, ext_left: float = 0.0, ext_right: float = 0.0,
                         fin_left: float = 0.0, fin_right: float = 0.0, ext_top: float = 0.0,
@@ -238,21 +261,8 @@ def full_shade_boundary(wall_azimuth, depth: float, window_w: float, window_h: f
     has_fins = fin_left > 0.0 or fin_right > 0.0
 
     if not has_fins:                                  # --- ruta cerrada exacta ---
-        gr = np.radians(g)
-        top = window_h + offset
-        if depth > 0:
-            vsa_cut = overhang_full_shade_vsa(depth, window_h, offset)
-            elev_vert = np.degrees(np.arctan(np.tan(np.radians(vsa_cut)) * np.cos(gr)))
-        else:
-            elev_vert = np.full_like(g, 90.0)
-        ext_side = np.where(g >= 0.0, ext_right, ext_left)
-        num = top * np.abs(np.sin(gr))
-        with np.errstate(divide="ignore", invalid="ignore"):
-            elev_lat = np.degrees(np.arctan(num / ext_side))
-        elev_lat = np.where(num < 1e-9, 0.0, elev_lat)
-        elev_lat = np.where((ext_side <= 1e-9) & (num >= 1e-9), 90.0, elev_lat)
-        elev = np.clip(np.maximum(elev_vert, elev_lat), 0.0, 90.0)
-        return g, elev
+        return g, _overhang_only_boundary(g, depth, window_w, window_h, offset,
+                                          ext_left, ext_right)
 
     # --- celosía: bisección por γ del umbral de elevación de sombra 100% ---
     Y = np.linspace(0.0, window_h, ny)
@@ -276,3 +286,97 @@ def full_shade_boundary(wall_azimuth, depth: float, window_w: float, window_h: f
         lo = np.where(full, lo, mid)
     elev = np.where(reachable, hi, 90.0)
     return g, elev
+
+
+def full_shade_boundary_analytic(wall_azimuth, depth: float, window_w: float, window_h: float,
+                                 offset: float = 0.0, ext_left: float = 0.0, ext_right: float = 0.0,
+                                 fin_left: float = 0.0, fin_right: float = 0.0, ext_top: float = 0.0,
+                                 n_gamma: int = 180):
+    """Borde de sombra 100% de la celosía en **forma cerrada** (sin bisección ni barrido).
+
+    Mismo contrato que :func:`full_shade_boundary` — devuelve ``(gamma_deg, elev_deg)``; la región
+    sombreada es ``elev ≥ elev_deg`` y ``90`` donde no se alcanza el 100%.
+
+    El borde lo fija la **arista inferior** (``y=0``): la ventana queda 100% sombreada cuando el
+    alero (que cubre desde un lado hasta ``P``) y la aleta (que cubre desde ``Q`` hasta el otro)
+    se tocan (``P=Q``). ``elev_full(γ)`` es el **mínimo** sobre los mecanismos de cubrimiento
+    (cada uno una curva analítica), porque añadir un dispositivo solo puede *bajar* el umbral:
+
+    - **alero solo** → :func:`_overhang_only_boundary` (arco de VSA ∪ círculo lateral);
+    - **aleta sola** (ala) → ``γ ≥ arctan(W/fin)`` ⟹ 100% a toda elevación;
+    - **alero+aleta** (``P=Q``) → "curva-razón" ``tan(e)=top·cosγ·sinγ/(fin·sinγ+ext·cosγ)``,
+      con el subrégimen de "escape por encima" de la aleta cuando ``offset>ext_top``.
+    """
+    g = np.linspace(-89.9, 89.9, n_gamma)
+    W, H, top = window_w, window_h, window_h + offset
+    if not (fin_left > 0.0 or fin_right > 0.0):
+        return g, _overhang_only_boundary(g, depth, W, H, offset, ext_left, ext_right)
+
+    a = np.radians(np.abs(g))
+    cosa, m = np.cos(a), np.tan(a)
+    ext_s = np.where(g >= 0.0, ext_right, ext_left)
+    fin_s = np.where(g >= 0.0, fin_right, fin_left)
+    has_fin = fin_s > 0.0
+
+    elev_oh = _overhang_only_boundary(g, depth, W, H, offset, ext_left, ext_right)
+    if depth > 0:
+        t_reach = top / depth                                    # t para que el alero llegue al antepecho
+        elev_vsa = np.degrees(np.arctan((top / depth) * cosa))
+    else:
+        t_reach, elev_vsa = np.inf, np.full_like(g, 90.0)
+
+    with np.errstate(invalid="ignore", divide="ignore"):
+        # Ala: la aleta cubre el ancho (γ≥arctan(W/fin)). Es 100% a TODA elevación solo si el
+        # alero tapa arriba (depth>0); sin alero la topología se invierte (intervalo inferior),
+        # fuera del alcance de la curva elev_full → se trata como no representable.
+        wing = has_fin & (m * fin_s >= W * (1.0 - 1e-9)) & (depth > 0.0)
+
+        denom = m * fin_s + ext_s                                # P=Q, subrégimen μ=fin
+        t1 = np.where(denom > 0.0, m * top / denom, np.inf)
+        mu_fin_ok = t1 <= (H + ext_top) / np.where(fin_s > 0.0, fin_s, np.nan)
+        t2 = np.where((ext_s > 0.0) & (offset > ext_top),        # subrégimen de escape (μ=(H+ext_top)/t)
+                      m * (offset - ext_top) / np.where(ext_s > 0.0, ext_s, np.nan), np.inf)
+        t_comb_raw = np.where(mu_fin_ok, t1, np.where(offset > ext_top, t2, t_reach))
+        t_comb = np.maximum(t_comb_raw, t_reach)                 # el alero debe alcanzar la arista
+        elev_comb = np.degrees(np.arctan(t_comb * cosa))
+
+    elev = np.where(has_fin, np.minimum(elev_oh, np.maximum(elev_comb, elev_vsa)), elev_oh)
+    elev = np.where(wing, 0.0, elev)
+    return g, np.clip(elev, 0.0, 90.0)
+
+
+def practical_shade_boundary(wall_azimuth, depth: float, window_w: float, window_h: float,
+                             offset: float = 0.0, ext_left: float = 0.0, ext_right: float = 0.0,
+                             fin_left: float = 0.0, fin_right: float = 0.0, ext_top: float = 0.0,
+                             coverage: float = 0.999999, n_gamma: int = 180, ny: int = 161,
+                             _iters: int = 40):
+    """Borde de sombra **práctico**: iso-curva de cobertura de **área** (por defecto 99.9999 %).
+
+    A diferencia del 100 % estricto (:func:`full_shade_boundary_analytic`), no exige que *todo*
+    punto esté en sombra, sino que el **área sombreada ≥ coverage**. Como el área es continua, la
+    curva es **suave**: para una protección normal/simétrica da prácticamente el borde 100 % real
+    sin los saltos por franjas diminutas; esos saltos solo reaparecen al acercarse a 100 % en
+    configuraciones **asimétricas con un dispositivo débil** (donde la franja expuesta es
+    geometría real). Se calcula con el motor exacto-en-x (:func:`shaded_fraction`) por bisección
+    en elevación, vectorizado sobre γ.
+
+    Devuelve ``(gamma_deg, elev_deg)``; la región es ``elev ≥ elev_deg`` y ``90`` donde no se
+    alcanza ``coverage``.
+    """
+    g = np.linspace(-89.9, 89.9, n_gamma)
+    wa = wall_azimuth
+
+    def covered(elev):
+        f = shaded_fraction(wa + g, elev, wa, depth, window_w, window_h, offset,
+                            ext_left, ext_right, fin_left, fin_right, ext_top, n=ny)
+        return f >= coverage
+
+    lo = np.full(n_gamma, 0.5)
+    hi = np.full(n_gamma, 89.9)
+    reachable = covered(hi.copy())
+    for _ in range(_iters):
+        mid = 0.5 * (lo + hi)
+        c = covered(mid)
+        hi = np.where(c, mid, hi)
+        lo = np.where(c, lo, mid)
+    return g, np.where(reachable, hi, 90.0)

@@ -82,6 +82,8 @@ def render_sunpath(
     year: int = 2026,
     shading: dict | None = None,
     theme: str = "pizarra",
+    shade_method: str = "practico",
+    shade_coverage: float = 0.999999,
 ):
     """Construye y devuelve la figura estereográfica de la carta solar.
 
@@ -103,7 +105,7 @@ def render_sunpath(
     ax.set_theta_direction(-1)  # azimut horario
 
     if shading:
-        _overhang_mask(ax, shading)
+        _overhang_mask(ax, shading, shade_method, shade_coverage)
 
     # Analema horario (líneas de igual hora a lo largo del año), punteado.
     if show_analemma:
@@ -168,23 +170,36 @@ def _selected_day(ax, date_iso, lat, lon):
                     ha="center", va="center", xytext=(0, 7), textcoords="offset points", zorder=6)
 
 
-def _overhang_mask(ax, s):
-    """Máscara de **sombra total (100%)** de la celosía sobre la estereográfica.
+def _overhang_mask(ax, s, method="practico", coverage=0.999999):
+    """Máscara de **sombra** de la celosía sobre la estereográfica.
 
-    Dibuja, como **curva cerrada y suave**, la región de posiciones solares para las que la
-    ventana queda completamente sombreada. El borde es exacto (forma cerrada sin aletas; umbral
-    por γ con :func:`shading.full_shade_boundary` con aletas) — sin muestreo de área, sin
-    ``contourf`` ni suavizado. Anota el VSA del alero y los HSA laterales (extensión o aleta).
+    Dibuja, como curva suave, la región de posiciones solares para las que la ventana queda
+    sombreada según ``method``:
+
+    - ``"practico"`` — borde de **cobertura de área** (:func:`shading.practical_shade_boundary`,
+      por defecto 99.9999 %): prácticamente el 100 % pero suave (sin saltos por franjas diminutas,
+      salvo en asimetrías reales); el más útil para diseño.
+    - ``"analitico"`` — **100 % estricto** en forma cerrada (:func:`shading.full_shade_boundary_analytic`).
+    - ``"raycast"`` — **100 % estricto** por ray casting (:func:`shading.full_shade_boundary`).
+
+    Anota el VSA del alero y los HSA laterales (extensión o aleta).
     """
     wall_az = s["wall_az"]
     depth, ww, wh = s["depth"], s["window_w"], s["window_h"]
     offset = s.get("offset", 0.0)
     ext_l, ext_r = s.get("ext_left", 0.0), s.get("ext_right", 0.0)
     fin_l, fin_r = s.get("fin_left", 0.0), s.get("fin_right", 0.0)
+    if method == "raycast":
+        boundary = shd.full_shade_boundary
+    elif method == "analitico":
+        boundary = shd.full_shade_boundary_analytic
+    else:
+        boundary = shd.practical_shade_boundary
 
+    kw = {"coverage": coverage} if boundary is shd.practical_shade_boundary else {}
     if depth > 0 or fin_l > 0 or fin_r > 0:
-        g, elev_full = shd.full_shade_boundary(wall_az, depth, ww, wh, offset,
-                                               ext_l, ext_r, fin_l, fin_r, s.get("ext_top", 0.0))
+        g, elev_full = boundary(wall_az, depth, ww, wh, offset,
+                                ext_l, ext_r, fin_l, fin_r, s.get("ext_top", 0.0), **kw)
         if elev_full.min() < 89.5:                       # hay alguna región de sombra total
             theta, r = np.radians(wall_az + g), _elev_to_r(elev_full)
             ax.fill_between(theta, 0.0, r, color=_SHADE_COLOR, alpha=0.20, zorder=0)

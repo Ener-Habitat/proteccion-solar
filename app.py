@@ -34,6 +34,11 @@ app_ui = ui.page_sidebar(
         ui.input_select("theme", "Tema de la carta",
                         choices={"pizarra": "Pizarra", "oscuro": "Oscuro", "claro": "Claro"},
                         selected="pizarra"),
+        ui.input_select("shade_method", "Máscara de sombra",
+                        choices={"practico": "Práctico (99.9999% área)",
+                                 "analitico": "100% analítico (cerrado)",
+                                 "raycast": "100% ray casting"},
+                        selected="practico"),
         ui.hr(),
         ui.input_checkbox("show_shading", "Protección solar (celosía)", value=True),
         ui.panel_conditional(
@@ -62,8 +67,6 @@ app_ui = ui.page_sidebar(
                                      value=0.0, min=0, max=2, step=0.05),
                     ui.input_numeric("fin_right", "Aleta derecha · profundidad (m)",
                                      value=0.0, min=0, max=2, step=0.05),
-                    ui.input_numeric("ext_top", "Extensión · arriba (m)",
-                                     value=0.0, min=0, max=2, step=0.1),
                 ),
                 id="acc_proteccion",
                 open=["Ventana", "Alero horizontal"],
@@ -173,8 +176,7 @@ def server(input, output, session):
                     "window_h": n(input.win_h(), 1.5), "window_w": n(input.win_w(), 1.2),
                     "ext_left": n(input.ext_left(), 0.0), "ext_right": n(input.ext_right(), 0.0),
                     "offset": n(input.offset(), 0.0),
-                    "fin_left": n(input.fin_left(), 0.0), "fin_right": n(input.fin_right(), 0.0),
-                    "ext_top": n(input.ext_top(), 0.0)}
+                    "fin_left": n(input.fin_left(), 0.0), "fin_right": n(input.fin_right(), 0.0)}
         return (latitude(), current_dt(), spec)
 
     # Un solo snapshot "debounced": todo se recalcula al SOLTAR (tras una breve pausa),
@@ -188,7 +190,7 @@ def server(input, output, session):
             return _placeholder("…")
         lat, dt, spec = s
         return render_sunpath(lat, current_dt=dt, year=dt.year, shading=spec,
-                              theme=input.theme())
+                              theme=input.theme(), shade_method=input.shade_method())
 
     @render.plot
     def window_diagram():
@@ -201,8 +203,7 @@ def server(input, output, session):
                                     spec["window_w"], spec["offset"],
                                     sun["azimuth"], sun["apparent_elevation"],
                                     ext_left=spec["ext_left"], ext_right=spec["ext_right"],
-                                    fin_left=spec["fin_left"], fin_right=spec["fin_right"],
-                                    ext_top=spec["ext_top"])
+                                    fin_left=spec["fin_left"], fin_right=spec["fin_right"])
 
 
 app = App(app_ui, server)

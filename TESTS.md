@@ -9,7 +9,7 @@ uv run pytest -q        # resumen compacto
 uv run pytest tests/test_shading.py -q   # un archivo
 ```
 
-Estado actual: **57 pruebas pasan, 1 se omite** (Tromsø en invierno: el Sol no sale, caso sin
+Estado actual: **64 pruebas pasan, 1 se omite** (Tromsø en invierno: el Sol no sale, caso sin
 trayectoria). `pvlib`/`pandas` son dependencias **solo de desarrollo** (validación); la app
 desplegada usa únicamente `numpy`/`matplotlib`.
 
@@ -75,6 +75,18 @@ equinoccios de 2026).
 | `test_raycast_matches_analytic_vsa_arc` | El ray casting recupera el **arco VSA analítico** en el límite de alero ancho (la ventana pasa a 100% sombreada justo en el VSA de corte). |
 | `test_constant_vsa_locus_is_a_circle` | El locus de VSA constante, proyectado en estereográfica, es un **círculo exacto** (residual < 1e‑6) — justifica dibujar la máscara como arco suave. |
 | `test_adding_device_never_reduces_shade` | **Unión (OR):** añadir aletas o extensiones nunca reduce la fracción sombreada. |
+
+**Borde de sombra 100% — ray casting y forma cerrada** (ver [`docs/metodologia-sombra.md`](docs/metodologia-sombra.md))
+
+| Prueba | Qué verifica |
+|---|---|
+| `test_exact_fraction_matches_dense_blocked_grid` | `shaded_fraction` (exacto en x) coincide con la malla densa de `_blocked` (400×400) para celosías completas. |
+| `test_full_shade_boundary_reduces_to_overhang` | El borde por ray casting sin aletas recupera el arco de VSA constante. |
+| `test_full_shade_boundary_is_true_locus_and_smooth` | El borde por ray casting es el locus real (dentro 100%, fuera no) y suave en el centro (sin sierra). |
+| `test_analytic_boundary_matches_raycasting` | El borde **en forma cerrada** coincide con el ray casting a < 0.3° (región significativa) en 5 configuraciones. |
+| `test_analytic_boundary_is_true_locus` | El borde analítico es el locus real de sombra 100% (validado contra área densa). |
+| `test_analytic_boundary_regimes_and_edges` | Regímenes del borde analítico: reducción al alero, alas (corte HSA), salida finita y suave. |
+| `test_practical_boundary_smooth_and_below_strict` | El borde **práctico (99% área)** nunca exige más sol que el 100% estricto y es **suave** aun en configs asimétricas que hacen saltar el estricto. |
 
 ---
 
