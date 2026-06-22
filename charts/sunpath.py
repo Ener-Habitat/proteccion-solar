@@ -85,7 +85,6 @@ def render_sunpath(
     shade_method: str = "practico",
     shade_coverage: float = 0.999999,
     show_protractor: bool = False,
-    decompose: bool = False,
 ):
     """Construye y devuelve la figura estereográfica de la carta solar.
 
@@ -109,11 +108,8 @@ def render_sunpath(
     if show_protractor and shading:
         _protractor(ax, shading["wall_az"], th)
     if shading:
-        if decompose:
-            _mask_decomposition(ax, shading, shade_method, shade_coverage)
-        else:
-            _overhang_mask(ax, shading, shade_method, shade_coverage)
-    if shading and (show_protractor or decompose):
+        _overhang_mask(ax, shading, shade_method, shade_coverage)
+    if shading and show_protractor:
         ax.legend(loc="lower left", fontsize=6, framealpha=0.85)
 
     # Analema horario (líneas de igual hora a lo largo del año), punteado.
@@ -200,43 +196,6 @@ def _protractor(ax, wall_az, th):
             ax.plot([thl, thl], [0.0, 1.0], color=_HSA_GRID, lw=0.5, ls=(0, (4, 3)), alpha=0.5, zorder=1)
     ax.plot([], [], color=_VSA_GRID, lw=1.0, label="VSA — aleros")
     ax.plot([], [], color=_HSA_GRID, lw=1.0, ls=(0, (4, 3)), label="HSA — aletas")
-
-
-_DECOMP = (("#e07b39", "alero solo"), ("#2ca02c", "alero + aletas"))
-
-
-def _mask_decomposition(ax, s, method="practico", coverage=0.999999):
-    """Descompone la región de sombra 100% por **procedencia**, derivada de las MISMAS curvas que
-    la máscara seleccionada — su **borde exterior coincide** con ella. Dos capas: **alero solo**
-    (casquete = borde del método con aletas=0) y **alero + aletas** (el resto de la región
-    combinada: lo que las aletas añaden al alero)."""
-    wall_az = s["wall_az"]
-    depth, ww, wh = s["depth"], s["window_w"], s["window_h"]
-    offset = s.get("offset", 0.0)
-    ext_l, ext_r = s.get("ext_left", 0.0), s.get("ext_right", 0.0)
-    fin_l, fin_r = s.get("fin_left", 0.0), s.get("fin_right", 0.0)
-    ext_t = s.get("ext_top", 0.0)
-    if method == "raycast":
-        boundary = shd.full_shade_boundary
-    elif method == "analitico":
-        boundary = shd.full_shade_boundary_analytic
-    else:
-        boundary = shd.practical_shade_boundary
-    kw = {"coverage": coverage} if boundary is shd.practical_shade_boundary else {}
-
-    g, e_comb = boundary(wall_az, depth, ww, wh, offset, ext_l, ext_r, fin_l, fin_r, ext_t, **kw)
-    _, e_oh = boundary(wall_az, depth, ww, wh, offset, ext_l, ext_r, 0.0, 0.0, ext_t, **kw)   # alero solo
-    theta = np.radians(wall_az + g)
-    has = e_comb < 89.5
-    r_comb = np.where(has, _elev_to_r(e_comb), 0.0)
-    r_oh = np.where(e_oh < 89.5, np.minimum(_elev_to_r(e_oh), r_comb), 0.0)
-
-    ax.fill_between(theta, 0.0, r_comb, color="#2ca02c", alpha=0.30, zorder=0)        # alero+aletas (base)
-    ax.fill_between(theta, 0.0, r_oh, color="#e07b39", alpha=0.40, zorder=0)          # alero solo (casquete)
-    ax.plot(theta, np.where(has, r_comb, np.nan), color="#1696a8", lw=1.0, zorder=1)  # borde = máscara seleccionada
-    for col, lab in _DECOMP:
-        ax.plot([], [], color=col, lw=6, alpha=0.5, label=lab)
-    _mark_device_angles(ax, wall_az, depth, ww, wh, offset, ext_l, ext_r, fin_l, fin_r)
 
 
 def _overhang_mask(ax, s, method="practico", coverage=0.999999):
