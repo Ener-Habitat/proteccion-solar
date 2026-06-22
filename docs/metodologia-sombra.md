@@ -21,6 +21,16 @@ Usamos `t = tan(VSA) = tan(elev)/cos γ` y `m = tan γ`. Proyección estereográ
 `r = tan((90°−elev)/2)` (cenit al centro `r=0`, horizonte `r=1`); el punto se coloca en el
 azimut `pared+γ`. Es **conforme**: mapea muchos lugares geométricos a **círculos**.
 
+### 1.1 El transportador: la retícula de ángulos VSA y HSA
+
+La herramienta clásica de lectura es el **transportador de ángulos de sombra** (Olgyay): la familia
+de **arcos de VSA constante** (cada 10°, para **aleros** horizontales) y de **rectas radiales de HSA
+constante** (cada 15°, para **aletas** verticales), relativos a la normal de la ventana. Cada arco y
+cada recta lleva su ángulo; los bordes de sombra que derivamos abajo se **componen** de estos arcos
+y rectas. (La app lo ofrece como capa opcional sobre la carta.)
+
+![Transportador: arcos de VSA y rectas de HSA con sus ángulos](assets/fig00_protractor.png)
+
 ## 2. Recapitulación horizontal (alero) — exacto y conocido
 
 Un alero sombrea el 100 % de la ventana cuando `VSA ≥ VSA_corte = arctan((H+offset)/depth)`.
@@ -37,9 +47,9 @@ Por dualidad alero↔aleta, VSA↔HSA:
 
 - La aleta cubre **todo el ancho** cuando `γ ≥ arctan(W/fin)` → en la estereográfica es una
   **recta radial** (corte HSA). Para una aleta de altura infinita, eso bastaría.
-- Una aleta **finita** deja escapar el rayo por **encima** de su borde superior. Esa condición es
-  `tan(elev) = (H+ext_top)·sin γ / W` → de nuevo un **círculo exacto** (mismo tipo que el círculo
-  lateral del alero).
+- Una aleta **finita** deja escapar el rayo por **encima** de su borde superior. El punto que manda
+  es la **esquina superior lejana** `(x=0, y=H)`, y la condición es `tan(elev) = ext_top·sin γ / W`
+  → de nuevo un **círculo exacto** (mismo tipo que el círculo lateral del alero).
 
 ![Recta HSA y círculo de escape](assets/fig02_fin_line_and_escape.png)
 
@@ -55,24 +65,28 @@ puede analítico" **no se sostiene a nivel de primitivas**.
 Lo genuinamente difícil es la **celosía**: cuando ni el alero ni la aleta sombrean al 100 % por
 separado pero **juntos sí**. La unión de sus sombras no es un único lugar geométrico.
 
-**Linchpin (verificado numéricamente):** la ventana queda 100 % sombreada ⟺ su **arista inferior
-`y=0`** queda cubierta (el umbral calculado solo en `y=0` coincide con el ray casting completo a
-**0.055°** = el paso del barrido). En `y=0`, con `top=H+offset` (caso `γ>0`):
+**Reducción por filas.** La ventana queda 100 % sombreada ⟺ **todas** sus filas `y` quedan cubiertas.
+Por fila, con `top_y = H+offset−y` y `etop_y = H+ext_top−y` (caso `γ>0`):
 
-- el alero cubre desde un lado hasta `P = min(W, W+ext − m·top/t)`;
-- la aleta cubre desde `Q = max(0, W − m·μ)`, con `μ = min(fin, (H+ext_top)/t)`.
+- el alero cubre desde un lado hasta `P = min(W, W+ext − m·top_y/t)`;
+- la aleta cubre desde `Q = max(0, W − m·μ)`, con `μ = min(fin, etop_y/t)`.
 
-La ventana se cubre cuando **`P ≥ Q`**. Como añadir un dispositivo **solo puede bajar** el umbral,
-`elev_full(γ)` es el **mínimo** sobre los mecanismos de cubrimiento, cada uno una curva analítica:
+La fila se cubre cuando **`P ≥ Q`** (o cuando un dispositivo solo cubre el ancho). En la mayoría de
+las protecciones la fila que **liga** es la **inferior** (`y=0`) — ahí el umbral coincide con el ray
+casting completo a **0.055°**. Pero cuando la **aleta domina y `ext_top` es chico**, la fila crítica
+**sube**; por eso se calcula el umbral **por fila** en forma cerrada y se toma el **máximo sobre las
+filas**. El umbral de cada fila es el **mínimo** sobre los mecanismos de cubrimiento (añadir un
+dispositivo solo puede *bajarlo*), cada uno una curva analítica:
 
 | Mecanismo | Curva | Tipo |
 |---|---|---|
 | Alero solo cubre el ancho (`P=W`) | `tan(elev)=tan(VSA_corte)·cos γ` ∪ `tan(elev)=top·sin γ/ext` | círculos |
-| Aleta sola cubre el ancho (`Q=0`) | `γ ≥ arctan(W/fin)` → **ala** (100 % a toda elevación) | recta radial |
+| Aleta sola cubre el ancho (`Q=0`) | `γ ≥ arctan(W/fin)` → **ala** (la aleta cubre el ancho de la fila) | recta radial |
 | Alero + aleta se tocan (`P=Q`) | `tan(elev)=top·sin γ·cos γ /(fin·sin γ + ext·cos γ)` ("curva‑razón") | — |
 
 (El subrégimen de "escape" de la aleta en `P=Q` solo aparece si `offset>ext_top`.) La frontera de
-la celosía es la **envolvente** (mínimo por γ) de estas piezas:
+la celosía es la **envolvente**: por cada γ, el **máximo sobre las filas** del mínimo (por fila)
+sobre estas piezas:
 
 ![Envolvente de la celosía](assets/fig04_eggcrate_composed.png)
 
@@ -83,10 +97,11 @@ polinomios trigonométricos); el script reporta su residual de ajuste a círculo
 ## 5. Resultado en forma cerrada
 
 `solar.shading.full_shade_boundary_analytic(...)` evalúa, por cada γ (malla **par** para evitar
-la singularidad de medida cero en `γ=0`), el mínimo de los mecanismos anteriores —sin bisección
-ni barrido de filas— y devuelve `(gamma, elev_full)`. La región sombreada es `elev ≥ elev_full`;
-`90°` donde no se alcanza el 100 %. El ray casting `full_shade_boundary(...)` se conserva como
-referencia. La app ofrece un selector con **tres** máscaras (ver §5.1).
+la singularidad de medida cero en `γ=0`), el **umbral por fila** en forma cerrada (las piezas de
+arriba) y toma el **máximo sobre las filas** — **sin bisección**. Devuelve `(gamma, elev_full)`; la
+región sombreada es `elev ≥ elev_full` y `90°` donde no se alcanza el 100 %. El ray casting
+`full_shade_boundary(...)` (mínimo sobre filas + bisección) se conserva como referencia. La app
+ofrece un selector con **tres** máscaras (ver §5.1).
 
 ### 5.1 100 % estricto vs. borde práctico — el efecto del umbral de cobertura
 
@@ -125,16 +140,19 @@ para inspeccionar la metodología y los saltos exactos del 100 % estricto.
 
 ## 6. Validación
 
-`full_shade_boundary_analytic` coincide con el ray casting en la región significativa a
-**< 0.01°** (el residual de `0.5°` que aparece en el ala es solo el piso de bisección del ray
-casting, donde el analítico es de hecho más exacto: `elev=0`). También se contrasta contra la
-cobertura de **área densa** (`shaded_fraction`, malla 400×400): justo dentro del borde la ventana
-está 100 % sombreada y justo afuera no.
+`full_shade_boundary_analytic` coincide con el ray casting a **< 0.01°** en las protecciones
+normales y a **< ~1°** en un barrido de 720 configuraciones (incluidas las dominadas por aletas con
+`ext_top` chico, que el "máximo sobre filas" resuelve). El residual (≤ **1.18°**) queda en regímenes
+**patológicos de dos intervalos** (`offset>ext_top` pasado el corte de la aleta): ahí la sombra es
+total a baja **y** a alta elevación con un hueco fino del 0.1–0.5 % en medio, y el "borde 100 %" es
+ambiguo de por sí. También se contrasta contra la cobertura de **área densa** (malla 400–600²):
+justo dentro del borde la ventana está 100 % sombreada y justo afuera no.
 
 ![Validación analítico vs ray casting](assets/fig05_validation_overlay.png)
 
 Tests: `test_analytic_boundary_matches_raycasting`, `test_analytic_boundary_is_true_locus`,
-`test_analytic_boundary_regimes_and_edges` (ver [`../TESTS.md`](../TESTS.md)).
+`test_analytic_boundary_regimes_and_edges`, `test_analytic_boundary_hardened_fin_dominant`
+(ver [`../TESTS.md`](../TESTS.md)).
 
 ## 7. Casos límite y alcance
 
@@ -144,6 +162,10 @@ Tests: `test_analytic_boundary_matches_raycasting`, `test_analytic_boundary_is_t
   100 % solo a **baja** elevación (intervalo *inferior*), que la representación `elev_full`
   (intervalo *superior*) no captura; ese caso degenerado queda fuera de alcance (devuelve `90°`,
   como el ray casting). La celosía real siempre tiene `depth>0`.
+- **Dos intervalos (`offset>ext_top` pasado el corte de la aleta):** la sombra total existe a baja
+  **y** a alta elevación con un hueco fino en medio. Como `elev_full` solo representa el intervalo
+  superior, ahí el borde es ambiguo (residual ≤ 1.18° vs ray casting). Para diseño, la máscara
+  **práctica** (default) lo dibuja suave.
 - **Estabilidad numérica:** divisiones por `sin γ`, `cos γ`, `t`, `ext`, `fin` se protegen con
   `np.errstate` + `np.where` (nunca NaN en la salida).
 

@@ -96,6 +96,30 @@ def _save(fig, name):
     print("escrito", name)
 
 
+def fig00_protractor():
+    """Transportador clásico: la familia de **arcos de VSA constante** (aleros, cada 10°) y de
+    **rectas radiales de HSA constante** (aletas, cada 15°), cada uno rotulado con su ángulo. Es la
+    retícula de lectura; los bordes de sombra se componen de estos arcos y rectas."""
+    g = np.linspace(-89, 89, 200)
+    fig, ax = plt.subplots(figsize=(5.8, 5.8))
+    _frame(ax, "Transportador: arcos de VSA (aleros) + rectas de HSA (aletas)")
+    for vsa in range(10, 90, 10):                                  # arcos de VSA constante
+        e = np.degrees(np.arctan(np.tan(np.radians(vsa)) * np.cos(np.radians(g))))
+        ax.plot(*_project(e, g), color="#3f8fb0", lw=0.7, alpha=0.85)
+        ax.text(*_project(vsa, 0), f"{vsa}°", color="#3f8fb0", fontsize=6.5, ha="center", va="center")
+    for hsa in range(0, 90, 15):                                   # rectas radiales de HSA constante
+        for sgn in ((1,) if hsa == 0 else (1, -1)):
+            xr, yr = _project(np.array([0.0, 90.0]), np.array([sgn * hsa, sgn * hsa]))
+            ax.plot([0, xr[0]], [0, yr[0]], color="#c0712e", lw=0.7, ls=(0, (4, 3)), alpha=0.85)
+            lx, ly = _project(4.0, sgn * hsa)
+            lab = "0°" if hsa == 0 else f"{sgn * hsa:+d}°"
+            ax.text(lx * 1.05, ly * 1.05, lab, color="#c0712e", fontsize=5.8, ha="center", va="center")
+    ax.plot([], [], color="#3f8fb0", lw=1.2, label="VSA (aleros)")
+    ax.plot([], [], color="#c0712e", lw=1.2, ls=(0, (4, 3)), label="HSA (aletas)")
+    ax.legend(loc="upper right", fontsize=7)
+    _save(fig, "fig00_protractor.png")
+
+
 def fig01_vsa_circle():
     """Alero: el locus de sombra 100% es un arco del círculo de VSA constante."""
     depth = 0.6
@@ -120,7 +144,7 @@ def fig02_fin_line_and_escape():
     """Aleta: corte HSA = recta radial; 'escape por encima' = círculo (tan e = k·sin γ)."""
     fin, ext_top = 0.5, 0.4
     hsa = fin_full_shade_hsa(fin, W)                  # corte HSA (recta radial)
-    k = (H + ext_top) / W                             # escape: tan(elev)=k·sin γ
+    k = ext_top / W                                   # escape (esquina superior lejana): tan(elev)=k·sin γ
     g = np.linspace(2, 89, 200)
     elev = np.degrees(np.arctan(k * np.sin(np.radians(g))))
     x, y = _project(elev, g)
@@ -248,6 +272,7 @@ def fig06_coverage_effect():
 
 def main():
     os.makedirs(ASSETS, exist_ok=True)
+    fig00_protractor()
     fig01_vsa_circle()
     fig02_fin_line_and_escape()
     fig03_single_fin_region()
