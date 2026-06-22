@@ -7,6 +7,9 @@ UI en Shiny for Python. Orquesta el núcleo solar (numpy puro) y el renderizado 
 
 from __future__ import annotations
 
+import base64
+import os
+import re
 import time
 from datetime import date, datetime
 
@@ -18,14 +21,40 @@ from solar.geometry import sun_at
 # Temixco, Morelos (IER-UNAM) como latitud inicial.
 TEMIXCO_LAT = 18.85
 
+_DOCS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "docs")
+
+
+def _methodology_markdown() -> str:
+    """Lee docs/metodologia-sombra.md e incrusta las imágenes como data-URI (autónomo)."""
+    try:
+        text = open(os.path.join(_DOCS, "metodologia-sombra.md"), encoding="utf-8").read()
+    except OSError:
+        return "## Metodología\n\nDocumentación no disponible."
+
+    def _inline(m):
+        alt, src = m.group(1), m.group(2)
+        try:
+            data = base64.b64encode(open(os.path.join(_DOCS, src), "rb").read()).decode()
+            return f"![{alt}](data:image/png;base64,{data})"
+        except OSError:
+            return m.group(0)
+
+    return re.sub(r"!\[([^\]]*)\]\(([^)]+)\)", _inline, text)
+
+
+METHODOLOGY_MD = _methodology_markdown()
+
 def _section(text: str):
     """Encabezado de sección del panel lateral."""
     return ui.tags.div(text, class_="text-uppercase text-secondary fw-bold small mt-2 mb-1")
 
 
-app_ui = ui.page_sidebar(
-    ui.sidebar(
-        _section("Lugar y momento"),
+app_ui = ui.page_navbar(
+    ui.nav_panel(
+        "Herramienta",
+        ui.layout_sidebar(
+            ui.sidebar(
+                _section("Lugar y momento"),
         ui.input_slider("lat", "Latitud (°)", min=-90, max=90, value=TEMIXCO_LAT, step=0.05),
         ui.input_slider("fecha", "Fecha", min=date(2026, 1, 1), max=date(2026, 12, 31),
                         value=date(2026, 6, 21), time_format="%d %b"),
@@ -91,9 +120,19 @@ app_ui = ui.page_sidebar(
             full_screen=True,
         ),
         col_widths={"sm": 12, "xl": (6, 6)},
+            ),
+        ),
+    ),
+    ui.nav_panel(
+        "Metodología",
+        ui.div(
+            ui.markdown(METHODOLOGY_MD),
+            class_="mx-auto p-3",
+            style="max-width: 920px;",
+        ),
     ),
     title="Protección solar · trayectoria y diseño de aleros",
-    fillable=False,
+    id="maintab",
 )
 
 
