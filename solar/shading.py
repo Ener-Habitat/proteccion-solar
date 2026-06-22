@@ -333,7 +333,9 @@ def full_shade_boundary_analytic(wall_azimuth, depth: float, window_w: float, wi
 
         denom = m * fin_s + ext_s                                # P=Q, subrégimen μ=fin
         t1 = np.where(denom > 0.0, m * top / denom, np.inf)
-        mu_fin_ok = t1 <= (H + ext_top) / np.where(fin_s > 0.0, fin_s, np.nan)
+        # tolerancia en el límite de régimen (t1 = (H+ext_top)/fin): el redondeo no debe tirar
+        # el punto a la rama equivocada y crear un pico espurio de un solo γ.
+        mu_fin_ok = t1 <= (H + ext_top) / np.where(fin_s > 0.0, fin_s, np.nan) * (1.0 + 1e-9)
         t2 = np.where((ext_s > 0.0) & (offset > ext_top),        # subrégimen de escape (μ=(H+ext_top)/t)
                       m * (offset - ext_top) / np.where(ext_s > 0.0, ext_s, np.nan), np.inf)
         t_comb_raw = np.where(mu_fin_ok, t1, np.where(offset > ext_top, t2, t_reach))

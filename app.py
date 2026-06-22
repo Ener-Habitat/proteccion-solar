@@ -68,6 +68,8 @@ app_ui = ui.page_navbar(
                                  "analitico": "100% analítico (cerrado)",
                                  "raycast": "100% ray casting"},
                         selected="practico"),
+        ui.input_checkbox("show_protractor", "Transportador (arcos VSA / rectas HSA)", value=False),
+        ui.input_checkbox("decompose", "Descomponer (alero / aletas / combinación)", value=False),
         ui.hr(),
         ui.input_checkbox("show_shading", "Protección solar (celosía)", value=True),
         ui.panel_conditional(
@@ -229,7 +231,9 @@ def server(input, output, session):
             return _placeholder("…")
         lat, dt, spec = s
         return render_sunpath(lat, current_dt=dt, year=dt.year, shading=spec,
-                              theme=input.theme(), shade_method=input.shade_method())
+                              theme=input.theme(), shade_method=input.shade_method(),
+                              show_protractor=input.show_protractor(),
+                              decompose=input.decompose())
 
     @render.plot
     def window_diagram():

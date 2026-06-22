@@ -84,6 +84,8 @@ def render_sunpath(
     theme: str = "pizarra",
     shade_method: str = "practico",
     shade_coverage: float = 0.999999,
+    show_protractor: bool = False,
+    decompose: bool = False,
 ):
     """Construye y devuelve la figura estereográfica de la carta solar.
 
@@ -104,8 +106,15 @@ def render_sunpath(
     ax.set_theta_zero_location("N")
     ax.set_theta_direction(-1)  # azimut horario
 
+    if show_protractor and shading:
+        _protractor(ax, shading["wall_az"], th)
     if shading:
-        _overhang_mask(ax, shading, shade_method, shade_coverage)
+        if decompose:
+            _mask_decomposition(ax, shading)
+        else:
+            _overhang_mask(ax, shading, shade_method, shade_coverage)
+    if shading and (show_protractor or decompose):
+        ax.legend(loc="lower left", fontsize=6, framealpha=0.85)
 
     # Analema horario (líneas de igual hora a lo largo del año), punteado.
     if show_analemma:
@@ -168,6 +177,65 @@ def _selected_day(ax, date_iso, lat, lon):
     for h, t_, r_ in zip(hh, th, rr):
         ax.annotate(f"{h:02d}", (t_, r_), fontsize=6, color=_SELECTED_COLOR,
                     ha="center", va="center", xytext=(0, 7), textcoords="offset points", zorder=6)
+
+
+_VSA_GRID = "#3f8fb0"   # arcos de VSA (aleros horizontales)
+_HSA_GRID = "#c0712e"   # rectas de HSA (aletas verticales)
+
+
+def _protractor(ax, wall_az, th):
+    """Retícula tipo transportador de Olgyay (capa de referencia, tenue): **arcos de VSA
+    constante** cada 10° para **aleros horizontales** y **rectas radiales de HSA constante** cada
+    15° para **aletas verticales**, relativos a la normal de la ventana ``wall_az``. Sirve para
+    leer VSA/HSA y ver que el borde de sombra se compone de estos arcos y rectas."""
+    g = np.linspace(-89.9, 89.9, 181)
+    for vsa in range(10, 90, 10):                                 # VSA (aleros)
+        elev = np.degrees(np.arctan(np.tan(np.radians(vsa)) * np.cos(np.radians(g))))
+        ax.plot(np.radians(wall_az + g), _elev_to_r(elev), color=_VSA_GRID, lw=0.5, alpha=0.5, zorder=1)
+        ax.annotate(f"{vsa}", (np.radians(wall_az), _elev_to_r(vsa)), fontsize=5.5,
+                    color=_VSA_GRID, ha="center", va="center", zorder=1, alpha=0.85)
+    for hsa in range(0, 90, 15):                                  # HSA (aletas)
+        for sgn in ((1,) if hsa == 0 else (1, -1)):
+            thl = np.radians(wall_az + sgn * hsa)
+            ax.plot([thl, thl], [0.0, 1.0], color=_HSA_GRID, lw=0.5, ls=(0, (4, 3)), alpha=0.5, zorder=1)
+    ax.plot([], [], color=_VSA_GRID, lw=1.0, label="VSA — aleros")
+    ax.plot([], [], color=_HSA_GRID, lw=1.0, ls=(0, (4, 3)), label="HSA — aletas")
+
+
+_DECOMP = (("#e07b39", "alero solo"), ("#7d3c98", "aletas solas"), ("#2ca02c", "solo combinados"))
+
+
+def _mask_decomposition(ax, s):
+    """Descompone la región de sombra 100% en tres capas de color: la que da el **alero solo**,
+    la de las **aletas solas**, y —en color nuevo— la **'solo combinados'** (lo que ni uno ni
+    otro logra por separado pero su unión sí). Visualiza §3.5: la combinación cubre MÁS que la
+    unión de las máscaras individuales."""
+    wall_az = s["wall_az"]
+    depth, ww, wh = s["depth"], s["window_w"], s["window_h"]
+    offset = s.get("offset", 0.0)
+    ext_l, ext_r = s.get("ext_left", 0.0), s.get("ext_right", 0.0)
+    fin_l, fin_r = s.get("fin_left", 0.0), s.get("fin_right", 0.0)
+    ext_t = s.get("ext_top", 0.0)
+    gg = np.linspace(-89.9, 89.9, 221)
+    el = np.linspace(0.5, 89.5, 150)
+    AZ, EL = np.meshgrid(wall_az + gg, el)
+    GG, _ = np.meshgrid(gg, el)
+    theta, r = np.radians(wall_az + GG), _elev_to_r(EL)
+    tau = 0.99
+
+    def reg(dp, el_, er_, fl, fr):
+        f = shd.shaded_fraction(AZ, EL, wall_az, dp, ww, wh, offset, el_, er_, fl, fr, ext_t, n=31)
+        return f >= tau
+
+    r_oh = reg(depth, ext_l, ext_r, 0.0, 0.0)        # alero solo
+    r_fin = reg(0.0, 0.0, 0.0, fin_l, fin_r)         # aletas solas (sin alero)
+    r_comb = reg(depth, ext_l, ext_r, fin_l, fin_r)  # combinación
+    r_tg = r_comb & ~(r_oh | r_fin)                  # solo combinados
+    for region, (col, lab) in zip((r_oh, r_fin, r_tg), _DECOMP):
+        if region.any():
+            ax.contourf(theta, r, region.astype(float), levels=[0.5, 2.0], colors=[col], alpha=0.35, zorder=0)
+        ax.plot([], [], color=col, lw=6, alpha=0.5, label=lab)
+    _mark_device_angles(ax, wall_az, depth, ww, wh, offset, ext_l, ext_r, fin_l, fin_r)
 
 
 def _overhang_mask(ax, s, method="practico", coverage=0.999999):
