@@ -66,7 +66,7 @@ app_ui = ui.page_navbar(
                                  "raycast": "100% ray casting"},
                         selected="practico"),
         ui.input_checkbox("show_protractor", "Transportador (arcos VSA / rectas HSA)", value=False),
-        ui.input_checkbox("decompose", "Descomponer (alero / aletas / combinación)", value=False),
+        ui.input_checkbox("decompose", "Descomponer (alero solo / alero + aletas)", value=False),
         ui.hr(),
         ui.input_checkbox("show_shading", "Protección solar (celosía)", value=True),
         ui.panel_conditional(

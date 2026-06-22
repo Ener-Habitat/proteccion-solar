@@ -202,15 +202,14 @@ def _protractor(ax, wall_az, th):
     ax.plot([], [], color=_HSA_GRID, lw=1.0, ls=(0, (4, 3)), label="HSA — aletas")
 
 
-_DECOMP = (("#e07b39", "alero solo"), ("#7d3c98", "aletas solas"), ("#2ca02c", "solo combinados"))
+_DECOMP = (("#e07b39", "alero solo"), ("#2ca02c", "alero + aletas"))
 
 
 def _mask_decomposition(ax, s, method="practico", coverage=0.999999):
     """Descompone la región de sombra 100% por **procedencia**, derivada de las MISMAS curvas que
-    la máscara seleccionada — su **borde exterior coincide** con ella. Tres capas: **alero solo**
-    (casquete, borde del método con aletas=0), **aletas solas** (banda baja, acotada por el escape
-    de la aleta en forma cerrada) y, en color nuevo, **'solo combinados'** (lo que muestra el resto
-    de la región combinada: ni uno ni otro por separado). Visualiza §3.5."""
+    la máscara seleccionada — su **borde exterior coincide** con ella. Dos capas: **alero solo**
+    (casquete = borde del método con aletas=0) y **alero + aletas** (el resto de la región
+    combinada: lo que las aletas añaden al alero)."""
     wall_az = s["wall_az"]
     depth, ww, wh = s["depth"], s["window_w"], s["window_h"]
     offset = s.get("offset", 0.0)
@@ -227,22 +226,12 @@ def _mask_decomposition(ax, s, method="practico", coverage=0.999999):
 
     g, e_comb = boundary(wall_az, depth, ww, wh, offset, ext_l, ext_r, fin_l, fin_r, ext_t, **kw)
     _, e_oh = boundary(wall_az, depth, ww, wh, offset, ext_l, ext_r, 0.0, 0.0, ext_t, **kw)   # alero solo
-    # aletas solas: región de BAJA elevación (cierre HSA + escape de la aleta), forma cerrada por lado
-    a = np.radians(np.abs(g))
-    fin_s = np.where(g >= 0.0, fin_r, fin_l)
-    with np.errstate(invalid="ignore", divide="ignore"):
-        cutoff = np.degrees(np.arctan(ww / np.where(fin_s > 0.0, fin_s, np.nan)))
-        e_esc = np.degrees(np.arctan(ext_t * np.sin(a) / ww))
-
     theta = np.radians(wall_az + g)
     has = e_comb < 89.5
     r_comb = np.where(has, _elev_to_r(e_comb), 0.0)
     r_oh = np.where(e_oh < 89.5, np.minimum(_elev_to_r(e_oh), r_comb), 0.0)
-    fins_apply = has & (np.abs(g) >= cutoff) & (fin_s > 0.0) & (e_esc > e_comb)
-    r_fin_in = np.where(fins_apply, np.minimum(_elev_to_r(e_esc), r_comb), r_comb)
 
-    ax.fill_between(theta, 0.0, r_comb, color="#2ca02c", alpha=0.30, zorder=0)        # solo combinados (base)
-    ax.fill_between(theta, r_fin_in, r_comb, color="#7d3c98", alpha=0.35, zorder=0)   # aletas solas (banda baja)
+    ax.fill_between(theta, 0.0, r_comb, color="#2ca02c", alpha=0.30, zorder=0)        # alero+aletas (base)
     ax.fill_between(theta, 0.0, r_oh, color="#e07b39", alpha=0.40, zorder=0)          # alero solo (casquete)
     ax.plot(theta, np.where(has, r_comb, np.nan), color="#1696a8", lw=1.0, zorder=1)  # borde = máscara seleccionada
     for col, lab in _DECOMP:
