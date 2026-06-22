@@ -1,7 +1,7 @@
-"""sun-protections — Fase 1: carta de trayectoria solar interactiva y educativa.
+"""sun-protections — carta de trayectoria solar interactiva y diseño de protecciones.
 
-UI en Shiny for Python. Orquesta el núcleo solar (numpy puro), el renderizado matplotlib
-y el panel educativo con ecuaciones vivas (MathJax). Pensado para exportarse con
+UI en Shiny for Python. Orquesta el núcleo solar (numpy puro) y el renderizado matplotlib
+(carta estereográfica + esquema de ventana). Pensado para exportarse con
 ``shinylive export`` y correr en GitHub Pages vía Pyodide, sin servidor.
 """
 
@@ -18,13 +18,19 @@ from solar.geometry import sun_at
 # Temixco, Morelos (IER-UNAM) como latitud inicial.
 TEMIXCO_LAT = 18.85
 
+def _section(text: str):
+    """Encabezado de sección del panel lateral."""
+    return ui.tags.div(text, class_="text-uppercase text-secondary fw-bold small mt-2 mb-1")
+
+
 app_ui = ui.page_sidebar(
     ui.sidebar(
+        _section("Lugar y momento"),
         ui.input_slider("lat", "Latitud (°)", min=-90, max=90, value=TEMIXCO_LAT, step=0.05),
-        ui.hr(),
         ui.input_slider("fecha", "Fecha", min=date(2026, 1, 1), max=date(2026, 12, 31),
                         value=date(2026, 6, 21), time_format="%d %b"),
         ui.input_slider("hora", "Hora solar", min=0, max=24, value=12, step=0.25),
+        _section("Apariencia"),
         ui.input_select("theme", "Tema de la carta",
                         choices={"pizarra": "Pizarra", "oscuro": "Oscuro", "claro": "Claro"},
                         selected="pizarra"),
@@ -32,39 +38,58 @@ app_ui = ui.page_sidebar(
         ui.input_checkbox("show_shading", "Protección solar (celosía)", value=True),
         ui.panel_conditional(
             "input.show_shading",
-            ui.input_numeric("wall_az", "Orientación de la ventana (azimut °)",
-                             value=180, min=0, max=360, step=5),
-            ui.input_numeric("win_h", "Alto de la ventana (m)", value=1.5, min=0.3, max=3, step=0.1),
-            ui.input_numeric("win_w", "Ancho de la ventana (m)", value=1.2, min=0.3, max=4, step=0.1),
-            ui.tags.small("Alero horizontal", class_="text-muted fw-bold"),
-            ui.input_numeric("depth", "Profundidad del alero (m)", value=0.6, min=0, max=3, step=0.05),
-            ui.input_numeric("ext_left", "Extensión alero · izquierda (m)",
-                             value=0.0, min=0, max=2, step=0.1),
-            ui.input_numeric("ext_right", "Extensión alero · derecha (m)",
-                             value=0.0, min=0, max=2, step=0.1),
-            ui.input_numeric("offset", "Alero sobre el dintel (m)", value=0.0, min=0, max=1.5, step=0.05),
-            ui.tags.small("Parasol vertical (aletas)", class_="text-muted fw-bold"),
-            ui.input_numeric("fin_left", "Aleta izquierda · profundidad (m)",
-                             value=0.0, min=0, max=2, step=0.05),
-            ui.input_numeric("fin_right", "Aleta derecha · profundidad (m)",
-                             value=0.0, min=0, max=2, step=0.05),
-            ui.input_numeric("ext_top", "Extensión aletas · arriba (m)",
-                             value=0.0, min=0, max=2, step=0.1),
+            ui.accordion(
+                ui.accordion_panel(
+                    "Ventana",
+                    ui.input_numeric("wall_az", "Orientación (azimut °)",
+                                     value=180, min=0, max=360, step=5),
+                    ui.input_numeric("win_h", "Alto (m)", value=1.5, min=0.3, max=3, step=0.1),
+                    ui.input_numeric("win_w", "Ancho (m)", value=1.2, min=0.3, max=4, step=0.1),
+                ),
+                ui.accordion_panel(
+                    "Alero horizontal",
+                    ui.input_numeric("depth", "Profundidad (m)", value=0.6, min=0, max=3, step=0.05),
+                    ui.input_numeric("ext_left", "Extensión · izquierda (m)",
+                                     value=0.0, min=0, max=2, step=0.1),
+                    ui.input_numeric("ext_right", "Extensión · derecha (m)",
+                                     value=0.0, min=0, max=2, step=0.1),
+                    ui.input_numeric("offset", "Separación sobre el dintel (m)",
+                                     value=0.0, min=0, max=1.5, step=0.05),
+                ),
+                ui.accordion_panel(
+                    "Aletas verticales (parasoles)",
+                    ui.input_numeric("fin_left", "Aleta izquierda · profundidad (m)",
+                                     value=0.0, min=0, max=2, step=0.05),
+                    ui.input_numeric("fin_right", "Aleta derecha · profundidad (m)",
+                                     value=0.0, min=0, max=2, step=0.05),
+                    ui.input_numeric("ext_top", "Extensión · arriba (m)",
+                                     value=0.0, min=0, max=2, step=0.1),
+                ),
+                id="acc_proteccion",
+                open=["Ventana", "Alero horizontal"],
+                multiple=True,
+            ),
         ),
         title="Controles",
-        width=300,
+        width=320,
+        # En móvil, page_sidebar lo dejaría "always-open" → se apila DEBAJO del contenido.
+        # Lo forzamos a colapsable (botón/overlay) para que no se vaya hasta abajo.
+        open={"desktop": "open", "mobile": "closed"},
     ),
-    ui.card(
-        ui.card_header("Carta de trayectoria solar"),
-        ui.output_plot("sunpath", height="600px"),
-        full_screen=True,
+    ui.layout_columns(
+        ui.card(
+            ui.card_header("Carta de trayectoria solar"),
+            ui.output_plot("sunpath", height="560px"),
+            full_screen=True,
+        ),
+        ui.card(
+            ui.card_header("Ventana y sombra de la celosía"),
+            ui.output_plot("window_diagram", height="560px"),
+            full_screen=True,
+        ),
+        col_widths={"sm": 12, "xl": (6, 6)},
     ),
-    ui.card(
-        ui.card_header("Ventana y sombra del alero"),
-        ui.output_plot("window_diagram", height="430px"),
-        full_screen=True,
-    ),
-    title="Sun-Protections · Trayectoria solar",
+    title="Protección solar · trayectoria y diseño de aleros",
     fillable=False,
 )
 
