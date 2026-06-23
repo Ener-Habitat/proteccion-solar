@@ -64,6 +64,28 @@ charts/
 tests/              validación (incl. contra pvlib)
 ```
 
+## Próximos desarrollos
+
+Interfaz ya **pulida y responsiva** (sidebar, tema alineado a la paleta de las cartas,
+cartas en pestañas en móvil ↔ lado a lado en escritorio, pantalla completa por carta).
+Pendientes, por prioridad:
+
+**Practicidad**
+- **Presets de ciudad** (Temixco, Mérida, CDMX, …) que fijen la latitud; opción
+  "personalizado" para liberar el slider.
+- **Panel de lectura numérica**: azimut, elevación (aparente/geométrica), orto/ocaso y
+  VSA/HSA actuales junto a la carta.
+- **Readout de la hora solar** en formato `HH:MM` junto al slider 0–24.
+- **Agrupar lo técnico en "Avanzado"** (método de máscara de sombra, transportador) en un
+  panel colapsado; por defecto "Práctico".
+
+**Pulido fino**
+- Botón **Reset** a valores por defecto.
+- **Tooltips de ayuda** (`?`) en entradas no obvias (VSA/HSA, separación, extensiones).
+- **Estado en la URL** para compartir una configuración (evaluar viabilidad en Shinylive).
+- Revisar **tamaños de fuente de las cartas** en móvil y contraste/accesibilidad (foco
+  visible, áreas táctiles mínimas).
+
 ## Despliegue
 
 Cada push a `main` exporta y publica en **GitHub Pages** mediante GitHub Actions

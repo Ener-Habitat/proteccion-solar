@@ -141,7 +141,7 @@ def render_sunpath(
                   labels=[f"{e}°" for e in _ELEV_GRID], angle=0, fontsize=6.5)
     ax.set_thetagrids(np.arange(0, 360, 15),
                       labels=["N", "", "", "NE", "", "", "E", "", "", "SE", "", "",
-                              "S", "", "", "SW", "", "", "W", "", "", "NW", "", ""])
+                              "S", "", "", "SO", "", "", "O", "", "", "NO", "", ""])
     for gl in ax.get_xgridlines() + ax.get_ygridlines():
         gl.set_color(th["grid"])
     ax.spines["polar"].set_color(th["grid"])
@@ -150,8 +150,13 @@ def render_sunpath(
         lbl.set_color(th["text"])
     hemi = "N" if latitude >= 0 else "S"
     ax.set_title(f"Trayectoria solar  ·  latitud {abs(latitude):.2f}° {hemi}",
-                 fontsize=11, color=th["text"])
-    fig.tight_layout()
+                 fontsize=10, color=th["text"])
+    # Shiny (render.plot) reaplica el layout "tight" sobre la figura YA redimensionada al
+    # contenedor. Si no fijamos un engine, usa el pad por defecto (1.08) y a tamaños chicos o
+    # poco cuadrados recorta el título y las etiquetas N/S/E/O. Fijamos "tight" con pad amplio
+    # (validado contra todo el rango de tamaños de la app); Shiny respeta este engine por ser
+    # adjust_compatible, así que el margen se conserva tanto en móvil como en escritorio.
+    fig.set_layout_engine("tight", pad=3.0)
     return fig
 
 

@@ -44,94 +44,158 @@ def _methodology_markdown() -> str:
 
 METHODOLOGY_MD = _methodology_markdown()
 
-def _section(text: str):
-    """Encabezado de sección del panel lateral."""
-    return ui.tags.div(text, class_="text-uppercase text-secondary fw-bold small mt-2 mb-1")
+# Tema propio alineado a la paleta "pizarra" de las cartas (charts/sunpath.py): cuerpo en
+# slate claro (#e9eef4-ish), texto slate (#2f3e4d), acento naranja de los arcos (#cf7a1e).
+# CSS puro vía head_content → cero deps nuevas, compatible con Pyodide/Shinylive.
+_BRAND = "#cf7a1e"        # naranja (analema/arcos de la carta)
+_SLATE = "#2f3e4d"        # texto / header (color de texto de la carta "pizarra")
+_THEME_CSS = f"""
+:root {{
+  --bs-body-bg: #eaf0f6;
+  --bs-body-color: {_SLATE};
+  --bs-emphasis-color: #1f2b38;
+  --bs-secondary-color: #5f6f80;
+  --bs-primary: {_BRAND};
+  --bs-primary-rgb: 207,122,30;
+  --bs-link-color: #b56716;
+  --bs-link-hover-color: #94530f;
+  --bs-border-color: #cfd9e6;
+}}
+body {{ background-color: #eaf0f6; color: {_SLATE}; }}
 
+/* Barra de título (antes navbar de pestañas): slate oscuro con acento de marca. */
+.navbar.navbar-static-top {{ background-color: {_SLATE}; border-bottom: 3px solid {_BRAND}; }}
+.navbar .bslib-page-title, .navbar-brand {{ color: #f2f6fa; font-weight: 600; }}
 
-app_ui = ui.page_navbar(
-    ui.nav_panel(
-        "Herramienta",
-        ui.layout_sidebar(
-            ui.sidebar(
-                _section("Lugar y momento"),
-        ui.input_slider("lat", "Latitud (°)", min=-90, max=90, value=TEMIXCO_LAT, step=0.05),
-        ui.input_slider("fecha", "Fecha", min=date(2026, 1, 1), max=date(2026, 12, 31),
-                        value=date(2026, 6, 21), time_format="%d %b"),
-        ui.input_slider("hora", "Hora solar", min=0, max=24, value=12, step=0.25),
-        _section("Apariencia"),
-        ui.input_select("shade_method", "Máscara de sombra",
-                        choices={"practico": "Práctico (99.9999% área)",
-                                 "analitico": "100% analítico (cerrado)",
-                                 "raycast": "100% ray casting"},
-                        selected="practico"),
-        ui.input_checkbox("show_protractor", "Transportador (arcos VSA / rectas HSA)", value=False),
-        ui.hr(),
-        ui.input_checkbox("show_shading", "Protección solar (celosía)", value=True),
-        ui.panel_conditional(
-            "input.show_shading",
-            ui.accordion(
-                ui.accordion_panel(
-                    "Ventana",
-                    ui.input_numeric("wall_az", "Orientación (azimut °)",
-                                     value=180, min=0, max=360, step=5),
-                    ui.input_numeric("win_h", "Alto (m)", value=1.5, min=0.3, max=3, step=0.1),
-                    ui.input_numeric("win_w", "Ancho (m)", value=1.2, min=0.3, max=4, step=0.1),
-                ),
-                ui.accordion_panel(
-                    "Alero horizontal",
-                    ui.input_numeric("depth", "Profundidad (m)", value=0.6, min=0, max=3, step=0.05),
-                    ui.input_numeric("ext_left", "Extensión · izquierda (m)",
-                                     value=0.0, min=0, max=2, step=0.1),
-                    ui.input_numeric("ext_right", "Extensión · derecha (m)",
-                                     value=0.0, min=0, max=2, step=0.1),
-                    ui.input_numeric("offset", "Separación sobre el dintel (m)",
-                                     value=0.0, min=0, max=1.5, step=0.05),
-                ),
-                ui.accordion_panel(
-                    "Aletas verticales (parasoles)",
-                    ui.input_numeric("fin_left", "Aleta izquierda · profundidad (m)",
-                                     value=0.0, min=0, max=2, step=0.05),
-                    ui.input_numeric("fin_right", "Aleta derecha · profundidad (m)",
-                                     value=0.0, min=0, max=2, step=0.05),
-                ),
-                id="acc_proteccion",
-                open=["Ventana", "Alero horizontal"],
-                multiple=True,
+/* Sidebar y cartas. */
+.bslib-sidebar-layout > .sidebar {{ background-color: #e4ebf3; border-right: 1px solid #cfd9e6; }}
+.sidebar-title {{ color: {_SLATE}; font-weight: 600; }}
+.card.bslib-card {{ background-color: #fff; border: 1px solid #d6e0ec; border-radius: 12px;
+  box-shadow: 0 1px 3px rgba(47,62,77,.06); }}
+
+/* Acordeón con acento de marca al abrir. */
+.accordion {{ --bs-accordion-bg: transparent; --bs-accordion-active-color: {_SLATE};
+  --bs-accordion-active-bg: rgba(207,122,30,.10); --bs-accordion-border-color: #cfd9e6;
+  --bs-accordion-btn-focus-box-shadow: 0 0 0 .2rem rgba(207,122,30,.25); }}
+
+/* Foco y controles en color de marca. */
+.form-control:focus, .form-select:focus {{ border-color: {_BRAND};
+  box-shadow: 0 0 0 .2rem rgba(207,122,30,.20); }}
+.form-check-input:checked {{ background-color: {_BRAND}; border-color: {_BRAND}; }}
+
+/* Sliders (ionRangeSlider, skin "shiny"). */
+.irs--shiny .irs-bar {{ background: {_BRAND}; border-color: {_BRAND}; }}
+.irs--shiny .irs-handle {{ background-color: {_BRAND} !important; border: 1px solid {_BRAND} !important; }}
+.irs--shiny .irs-handle:hover, .irs--shiny .irs-handle.state_hover {{ background-color: #b56716 !important; }}
+.irs--shiny .irs-single, .irs--shiny .irs-from, .irs--shiny .irs-to {{ background-color: {_SLATE}; }}
+.irs--shiny .irs-min, .irs--shiny .irs-max {{ color: #5f6f80; background: #dde6f0; }}
+
+/* Cartas: cada card define su altura (responsiva) y su plot la llena; en móvil son pestañas
+   y en escritorio (≥1200px) se muestran lado a lado, cada una con su botón de pantalla
+   completa. */
+#charts .card {{ height: clamp(360px, 72vh, 700px); }}
+@media (min-width: 1200px) {{
+  /* Ocultar la barra de pestañas y poner los dos paneles lado a lado. !important +
+     flex-direction:row vencen el flex-column de .html-fill-container. */
+  #charts .nav.nav-underline {{ display: none !important; }}
+  #charts .tab-content {{ display: flex !important; flex-direction: row !important;
+    gap: 1rem; align-items: stretch; }}
+  #charts .tab-content > .tab-pane {{ display: block !important; flex: 1 1 0 !important;
+    min-width: 0; }}
+}}
+
+/* La carta solar reserva margen amplio alrededor del círculo (layout "tight" con pad en
+   charts/sunpath.py) para que ni el título ni N/S/E/O se corten sea cual sea la proporción
+   del contenedor (retrato móvil ↔ apaisado de pestañas). */
+"""
+
+app_ui = ui.page_sidebar(
+    ui.sidebar(
+        ui.accordion(
+            ui.accordion_panel(
+                "Ubicación y momento",
+                ui.input_slider("lat", "Latitud (°)", min=-90, max=90,
+                                value=TEMIXCO_LAT, step=0.05),
+                ui.input_slider("fecha", "Fecha", min=date(2026, 1, 1),
+                                max=date(2026, 12, 31), value=date(2026, 6, 21),
+                                time_format="%d %b"),
+                ui.input_slider("hora", "Hora solar", min=0, max=24, value=12, step=0.25),
             ),
+            ui.accordion_panel(
+                "Apariencia",
+                ui.input_select("shade_method", "Máscara de sombra",
+                                choices={"practico": "Práctico (99.9999% área)",
+                                         "analitico": "100% analítico (cerrado)",
+                                         "raycast": "100% ray casting"},
+                                selected="practico"),
+                ui.input_checkbox("show_protractor",
+                                  "Transportador (arcos VSA / rectas HSA)", value=False),
+            ),
+            ui.accordion_panel(
+                "Protección solar",
+                ui.input_checkbox("show_shading", "Protección solar (celosía)", value=True),
+                ui.panel_conditional(
+                    "input.show_shading",
+                    ui.accordion(
+                        ui.accordion_panel(
+                            "Ventana",
+                            ui.input_numeric("wall_az", "Orientación (azimut °)",
+                                             value=180, min=0, max=360, step=5),
+                            ui.input_numeric("win_h", "Alto (m)", value=1.5,
+                                             min=0.3, max=3, step=0.1),
+                            ui.input_numeric("win_w", "Ancho (m)", value=1.2,
+                                             min=0.3, max=4, step=0.1),
+                        ),
+                        ui.accordion_panel(
+                            "Alero horizontal",
+                            ui.input_numeric("depth", "Profundidad (m)", value=0.6,
+                                             min=0, max=3, step=0.05),
+                            ui.input_numeric("ext_left", "Extensión · izquierda (m)",
+                                             value=0.0, min=0, max=2, step=0.1),
+                            ui.input_numeric("ext_right", "Extensión · derecha (m)",
+                                             value=0.0, min=0, max=2, step=0.1),
+                            ui.input_numeric("offset", "Separación sobre el dintel (m)",
+                                             value=0.0, min=0, max=1.5, step=0.05),
+                        ),
+                        ui.accordion_panel(
+                            "Aletas verticales (parasoles)",
+                            ui.input_numeric("fin_left", "Aleta izquierda · profundidad (m)",
+                                             value=0.0, min=0, max=2, step=0.05),
+                            ui.input_numeric("fin_right", "Aleta derecha · profundidad (m)",
+                                             value=0.0, min=0, max=2, step=0.05),
+                        ),
+                        id="acc_proteccion",
+                        open=["Ventana", "Alero horizontal"],
+                        multiple=True,
+                    ),
+                ),
+            ),
+            id="acc_main",
+            # Arranca solo con "Ubicación y momento" abierto; el resto colapsado hacia arriba.
+            open=["Ubicación y momento"],
+            multiple=True,
         ),
-        title="Controles",
         width=320,
-        # En móvil, page_sidebar lo dejaría "always-open" → se apila DEBAJO del contenido.
-        # Lo forzamos a colapsable (botón/overlay) para que no se vaya hasta abajo.
+        # En móvil lo dejamos colapsado (botón/overlay) para que no se apile debajo del
+        # contenido y empuje las cartas hasta el fondo.
         open={"desktop": "open", "mobile": "closed"},
     ),
-    ui.layout_columns(
-        ui.card(
-            ui.card_header("Carta de trayectoria solar"),
-            ui.output_plot("sunpath", height="560px"),
-            full_screen=True,
+    # Cartas: pestañas en móvil (una a la vez, ocupa el alto útil) que el CSS convierte en
+    # lado-a-lado en escritorio (≥1200px). Un solo juego de outputs → no duplica renders.
+    ui.div(
+        ui.navset_underline(
+            ui.nav_panel("Carta solar",
+                         ui.card(ui.output_plot("sunpath", height="100%"), full_screen=True)),
+            ui.nav_panel("Ventana",
+                         ui.card(ui.output_plot("window_diagram", height="100%"), full_screen=True)),
+            id="charts_tabs",
         ),
-        ui.card(
-            ui.card_header("Ventana y sombra de la celosía"),
-            ui.output_plot("window_diagram", height="560px"),
-            full_screen=True,
-        ),
-        col_widths={"sm": 12, "xl": (6, 6)},
-            ),
-        ),
+        id="charts",
     ),
-    # Pestaña de Metodología comentada (re-activar quitando los comentarios; requiere docs/ en el export):
-    # ui.nav_panel(
-    #     "Metodología",
-    #     ui.div(
-    #         ui.markdown(METHODOLOGY_MD),
-    #         class_="mx-auto p-3",
-    #         style="max-width: 920px;",
-    #     ),
-    # ),
-    title="Protección solar · trayectoria y diseño de aleros",
-    id="maintab",
+    ui.head_content(ui.tags.style(_THEME_CSS)),
+    # Metodología (METHODOLOGY_MD) quedó fuera al pasar a una sola vista; reintroducir como
+    # ui.page_navbar + nav_panel solo si vuelve a haber ≥2 secciones.
+    title="Protección solar",
 )
 
 

@@ -68,7 +68,11 @@ def render_window_shadow(wall_az: float, depth: float, window_h: float, window_w
     ax.set_aspect("equal")
     ax.axis("off")
     ax.set_xlim(sx0 - depth - 0.5, xR + 0.5)
-    ax.set_ylim(-0.55, py0 + depth + 0.45)
+    # Margen inferior holgado (ahí caen las etiquetas "Alzado"/"Sección") y
+    # superior ajustado a la extensión real (alero o aletas, lo que sobresalga
+    # más) para no dejar espacio muerto arriba.
+    top_extent = py0 + max(depth, fin_left, fin_right)
+    ax.set_ylim(-0.72, top_extent + 0.34)
 
     title = ("Sin sol directo sobre la ventana" if (not lit and sun_elev > 0)
              else "Sol bajo el horizonte" if not lit
