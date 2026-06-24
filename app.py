@@ -277,6 +277,7 @@ app_ui = ui.page_sidebar(
         ),
         class_="app-title",
     ),
+    window_title="Protección solar",
 )
 
 
