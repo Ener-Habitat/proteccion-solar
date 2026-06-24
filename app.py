@@ -44,62 +44,136 @@ def _methodology_markdown() -> str:
 
 METHODOLOGY_MD = _methodology_markdown()
 
-# Tema propio alineado a la paleta "pizarra" de las cartas (charts/sunpath.py): cuerpo en
-# slate claro (#e9eef4-ish), texto slate (#2f3e4d), acento naranja de los arcos (#cf7a1e).
-# CSS puro vía head_content → cero deps nuevas, compatible con Pyodide/Shinylive.
-_BRAND = "#cf7a1e"        # naranja (analema/arcos de la carta)
+# Tema "golden hour" alineado a la paleta de las cartas (charts/sunpath.py): base slate fría,
+# acento ámbar cálido en degradado (sol), tarjetas claras con sombras suaves. CSS puro vía
+# head_content → cero deps nuevas, compatible con Pyodide/Shinylive. La tipografía usa una
+# pila de sistema (sin red): elegante y con fallback inmediato si no hay fuente externa.
+_BRAND = "#cf7a1e"        # naranja quemado (analema/arcos de la carta)
+_AMBER = "#f5a623"        # ámbar cálido (extremo claro del degradado "sol")
 _SLATE = "#2f3e4d"        # texto / header (color de texto de la carta "pizarra")
+_INK = "#1d2935"          # slate profundo (énfasis / fondo de header)
 _THEME_CSS = f"""
 :root {{
-  --bs-body-bg: #eaf0f6;
+  --bs-body-bg: #eef3f9;
   --bs-body-color: {_SLATE};
-  --bs-emphasis-color: #1f2b38;
-  --bs-secondary-color: #5f6f80;
+  --bs-emphasis-color: {_INK};
+  --bs-secondary-color: #66788a;
   --bs-primary: {_BRAND};
   --bs-primary-rgb: 207,122,30;
   --bs-link-color: #b56716;
   --bs-link-hover-color: #94530f;
-  --bs-border-color: #cfd9e6;
+  --bs-border-color: #d3deeb;
+  --bs-body-font-family: "Inter", "Segoe UI", -apple-system, BlinkMacSystemFont,
+    "Helvetica Neue", Arial, sans-serif;
+  --sun: linear-gradient(135deg, {_AMBER} 0%, {_BRAND} 100%);
 }}
-body {{ background-color: #eaf0f6; color: {_SLATE}; }}
+* {{ -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility; }}
 
-/* Barra de título (antes navbar de pestañas): slate oscuro con acento de marca. */
-.navbar.navbar-static-top {{ background-color: {_SLATE}; border-bottom: 3px solid {_BRAND}; }}
-.navbar .bslib-page-title, .navbar-brand {{ color: #f2f6fa; font-weight: 600; }}
+/* Fondo del cuerpo: degradado lavanda-frío muy sutil, evoca el cielo. */
+body {{
+  background: radial-gradient(1200px 600px at 78% -8%, #fff6e8 0%, rgba(255,246,232,0) 55%),
+              linear-gradient(180deg, #eef3f9 0%, #e4ecf5 100%) fixed;
+  color: {_SLATE};
+  letter-spacing: .1px;
+}}
 
-/* Sidebar y cartas. */
-.bslib-sidebar-layout > .sidebar {{ background-color: #e4ebf3; border-right: 1px solid #cfd9e6; }}
-.sidebar-title {{ color: {_SLATE}; font-weight: 600; }}
-.card.bslib-card {{ background-color: #fff; border: 1px solid #d6e0ec; border-radius: 12px;
-  box-shadow: 0 1px 3px rgba(47,62,77,.06); }}
+/* ── Cabecera (barra de título) ───────────────────────────────────────────────
+   Slate profundo con un sutil brillo dorado a la derecha (sol naciente) y una
+   fina línea de degradado ámbar abajo. */
+.navbar.navbar-static-top {{
+  background: radial-gradient(640px 220px at 92% -40%, rgba(245,166,35,.28) 0%, rgba(245,166,35,0) 60%),
+              linear-gradient(120deg, {_INK} 0%, {_SLATE} 100%);
+  border-bottom: none;
+  box-shadow: 0 2px 18px rgba(29,41,53,.22);
+  position: relative;
+  padding-top: .5rem; padding-bottom: .5rem;
+}}
+.navbar.navbar-static-top::after {{
+  content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 3px;
+  background: linear-gradient(90deg, {_AMBER}, {_BRAND} 60%, rgba(207,122,30,0));
+}}
+.navbar .bslib-page-title, .navbar-brand {{ color: #f4f8fc; font-weight: 700;
+  letter-spacing: .2px; }}
+/* Subtítulo (la app pasa el título como bloque con dos líneas). */
+.app-title {{ display: flex; align-items: center; gap: .6rem; line-height: 1.05; }}
+.app-title .sun-dot {{ width: 18px; height: 18px; border-radius: 50%;
+  background: var(--sun); box-shadow: 0 0 0 4px rgba(245,166,35,.18),
+  0 0 16px 2px rgba(245,166,35,.45); flex: none; }}
+.app-title small {{ display: block; font-weight: 500; font-size: .68rem;
+  letter-spacing: 1.4px; text-transform: uppercase; color: #9fb2c6; margin-top: 2px; }}
 
-/* Acordeón con acento de marca al abrir. */
-.accordion {{ --bs-accordion-bg: transparent; --bs-accordion-active-color: {_SLATE};
-  --bs-accordion-active-bg: rgba(207,122,30,.10); --bs-accordion-border-color: #cfd9e6;
-  --bs-accordion-btn-focus-box-shadow: 0 0 0 .2rem rgba(207,122,30,.25); }}
+/* ── Sidebar ──────────────────────────────────────────────────────────────── */
+.bslib-sidebar-layout > .sidebar {{
+  background: linear-gradient(180deg, #eaf1f8 0%, #e2eaf4 100%);
+  border-right: 1px solid #d3deeb;
+}}
+.bslib-sidebar-layout > .sidebar .sidebar-content {{ padding-top: .85rem; }}
+.sidebar-title {{ color: {_SLATE}; font-weight: 700; }}
+.control-label {{ font-weight: 600; font-size: .82rem; color: #4a5b6c;
+  letter-spacing: .2px; }}
 
-/* Foco y controles en color de marca. */
+/* ── Tarjetas ─────────────────────────────────────────────────────────────── */
+.card.bslib-card {{
+  background: #ffffff;
+  border: 1px solid #e0e8f1;
+  border-radius: 16px;
+  box-shadow: 0 1px 2px rgba(29,41,53,.04), 0 8px 24px -12px rgba(29,41,53,.18);
+  transition: box-shadow .25s ease, transform .25s ease;
+}}
+.card.bslib-card:hover {{
+  box-shadow: 0 2px 4px rgba(29,41,53,.06), 0 16px 36px -14px rgba(29,41,53,.28);
+}}
+.card.bslib-card > .card-body {{ padding: .75rem; }}
+
+/* ── Acordeón ─────────────────────────────────────────────────────────────── */
+.accordion {{ --bs-accordion-bg: transparent; --bs-accordion-active-color: {_INK};
+  --bs-accordion-active-bg: rgba(245,166,35,.12); --bs-accordion-border-color: #d3deeb;
+  --bs-accordion-btn-focus-box-shadow: 0 0 0 .2rem rgba(245,166,35,.25);
+  --bs-accordion-border-radius: 12px; }}
+.accordion-item {{ border-radius: 12px !important; overflow: hidden; margin-bottom: .4rem;
+  border: 1px solid #d8e2ee; }}
+.accordion-button {{ font-weight: 600; color: {_SLATE}; }}
+.accordion-button:not(.collapsed) {{ box-shadow: none;
+  border-left: 3px solid {_BRAND}; }}
+.accordion-button::after {{ filter: saturate(0) brightness(.6); }}
+.accordion-button:not(.collapsed)::after {{ filter: none; }}
+
+/* ── Controles ────────────────────────────────────────────────────────────── */
+.form-control, .form-select {{ border-radius: 9px; border-color: #cdd9e7;
+  transition: border-color .15s ease, box-shadow .15s ease; }}
 .form-control:focus, .form-select:focus {{ border-color: {_BRAND};
-  box-shadow: 0 0 0 .2rem rgba(207,122,30,.20); }}
+  box-shadow: 0 0 0 .2rem rgba(245,166,35,.22); }}
 .form-check-input:checked {{ background-color: {_BRAND}; border-color: {_BRAND}; }}
+.form-check-input:focus {{ box-shadow: 0 0 0 .2rem rgba(245,166,35,.22); }}
 
-/* Sliders (ionRangeSlider, skin "shiny"). */
-.irs--shiny .irs-bar {{ background: {_BRAND}; border-color: {_BRAND}; }}
-.irs--shiny .irs-handle {{ background-color: {_BRAND} !important; border: 1px solid {_BRAND} !important; }}
-.irs--shiny .irs-handle:hover, .irs--shiny .irs-handle.state_hover {{ background-color: #b56716 !important; }}
-.irs--shiny .irs-single, .irs--shiny .irs-from, .irs--shiny .irs-to {{ background-color: {_SLATE}; }}
-.irs--shiny .irs-min, .irs--shiny .irs-max {{ color: #5f6f80; background: #dde6f0; }}
+/* ── Sliders (ionRangeSlider, skin "shiny") ──────────────────────────────────
+   Barra con degradado "sol" y manija con halo dorado al pasar el ratón. */
+.irs--shiny .irs-line {{ background: #d7e1ee; border: none; border-radius: 6px; height: 6px; }}
+.irs--shiny .irs-bar {{ background: var(--sun); border: none; height: 6px; }}
+.irs--shiny .irs-handle {{ background: #ffffff !important; border: 2px solid {_BRAND} !important;
+  box-shadow: 0 1px 4px rgba(29,41,53,.25) !important; top: 22px; width: 18px; height: 18px;
+  transition: box-shadow .15s ease; }}
+.irs--shiny .irs-handle:hover, .irs--shiny .irs-handle.state_hover {{
+  box-shadow: 0 0 0 5px rgba(245,166,35,.22), 0 1px 4px rgba(29,41,53,.25) !important; }}
+.irs--shiny .irs-single, .irs--shiny .irs-from, .irs--shiny .irs-to {{
+  background-color: {_INK}; border-radius: 6px; font-weight: 600; }}
+.irs--shiny .irs-single::before, .irs--shiny .irs-from::before, .irs--shiny .irs-to::before {{
+  border-top-color: {_INK}; }}
+.irs--shiny .irs-min, .irs--shiny .irs-max {{ color: #66788a; background: #dde6f0;
+  border-radius: 6px; }}
 
-/* Cartas: cada card define su altura (responsiva) y su plot la llena; en móvil son pestañas
-   y en escritorio (≥1200px) se muestran lado a lado, cada una con su botón de pantalla
-   completa. */
-#charts .card {{ height: clamp(360px, 72vh, 700px); }}
+/* ── Cartas: responsivas (pestañas en móvil → lado a lado en ≥1200px) ──────── */
+#charts {{ padding: .25rem; }}
+#charts .card {{ height: clamp(360px, 72vh, 720px); }}
+#charts .nav-underline .nav-link {{ font-weight: 600; color: #66788a; }}
+#charts .nav-underline .nav-link.active {{ color: {_BRAND};
+  border-bottom-color: {_BRAND}; }}
 @media (min-width: 1200px) {{
   /* Ocultar la barra de pestañas y poner los dos paneles lado a lado. !important +
      flex-direction:row vencen el flex-column de .html-fill-container. */
   #charts .nav.nav-underline {{ display: none !important; }}
   #charts .tab-content {{ display: flex !important; flex-direction: row !important;
-    gap: 1rem; align-items: stretch; }}
+    gap: 1.1rem; align-items: stretch; }}
   #charts .tab-content > .tab-pane {{ display: block !important; flex: 1 1 0 !important;
     min-width: 0; }}
 }}
@@ -195,7 +269,14 @@ app_ui = ui.page_sidebar(
     ui.head_content(ui.tags.style(_THEME_CSS)),
     # Metodología (METHODOLOGY_MD) quedó fuera al pasar a una sola vista; reintroducir como
     # ui.page_navbar + nav_panel solo si vuelve a haber ≥2 secciones.
-    title="Protección solar",
+    title=ui.div(
+        ui.span(class_="sun-dot"),
+        ui.div(
+            ui.span("Protección solar"),
+            ui.tags.small("Trayectoria solar · diseño de aleros"),
+        ),
+        class_="app-title",
+    ),
 )
 
 
