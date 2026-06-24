@@ -32,6 +32,14 @@ _ANG = "#a06b00"
 _GLASS = "#7fbfd0"
 
 
+_RUMBOS = ["N", "NE", "E", "SE", "S", "SO", "O", "NO"]
+
+
+def _rumbo(azimuth: float) -> str:
+    """Rumbo de 8 puntos más cercano a un azimut (N=0°, horario)."""
+    return _RUMBOS[int(round((azimuth % 360) / 45.0)) % 8]
+
+
 def _angle_arc(ax, center, theta1, theta2, radius, label, lab_r=1.5):
     ax.add_patch(mp.Arc(center, 2 * radius, 2 * radius, angle=0, theta1=theta1, theta2=theta2,
                         color=_ANG, lw=1.2, zorder=6))
@@ -61,7 +69,7 @@ def render_window_shadow(wall_az: float, depth: float, window_h: float, window_w
 
     fig, ax = plt.subplots(figsize=(10.5, 5.2))
 
-    _alzado(ax, X, Y, blocked, lit, window_w, window_h, top, xL, xR, ext_left, ext_right)
+    _alzado(ax, X, Y, blocked, lit, window_w, window_h, top, xL, xR, ext_left, ext_right, wall_az)
     _planta(ax, depth, window_w, ext_left, ext_right, xL, xR, py0, fin_left, fin_right)
     _seccion(ax, depth, window_h, top, shadow_y, lit, sx0)
 
@@ -82,8 +90,8 @@ def render_window_shadow(wall_az: float, depth: float, window_h: float, window_w
     return fig
 
 
-def _alzado(ax, X, Y, blocked, lit, window_w, window_h, top, xL, xR, ext_left, ext_right):
-    """Vista frontal con la sombra real (bloque central)."""
+def _alzado(ax, X, Y, blocked, lit, window_w, window_h, top, xL, xR, ext_left, ext_right, wall_az=180.0):
+    """Vista frontal **desde el interior** (mirando hacia afuera) con la sombra real."""
     if not lit:
         ax.add_patch(mp.Rectangle((0, 0), window_w, window_h, facecolor=_NOSUN, edgecolor="none"))
     else:
@@ -111,7 +119,15 @@ def _alzado(ax, X, Y, blocked, lit, window_w, window_h, top, xL, xR, ext_left, e
     ax.text(xh + 0.05, window_h / 2, f"alto {window_h:.2f} m", fontsize=6.5, color="#666",
             ha="center", va="center", rotation=90)
 
-    ax.text(window_w / 2, -0.46, "Alzado (frente)", fontsize=9, ha="center", va="center", color="#444")
+    # Rumbo de cada borde, visto desde el interior (se mira hacia +wall_az): la izquierda
+    # del observador es wall_az−90 y la derecha wall_az+90. Gira con la orientación.
+    ax.text(xL - 0.08, top, f"{_rumbo(wall_az - 90)} ←", fontsize=7.5, color="#888",
+            ha="right", va="center")
+    ax.text(xR + 0.08, top, f"→ {_rumbo(wall_az + 90)}", fontsize=7.5, color="#888",
+            ha="left", va="center")
+
+    ax.text(window_w / 2, -0.46, "Alzado — vista desde el interior", fontsize=9,
+            ha="center", va="center", color="#444")
 
 
 def _planta(ax, depth, window_w, ext_left, ext_right, xL, xR, py0, fin_left=0.0, fin_right=0.0):
